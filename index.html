@@ -254,11 +254,13 @@
   <div id="lockind">LOCK ACQUIRED - HOLD Q</div>
   <div id="wavecall"></div>
   <div id="devIndicator" style="position:absolute;bottom:6px;left:6px;font-size:11px;color:#0f8;text-shadow:0 0 6px #0f8;display:none;pointer-events:none;">⚙ DEV MODE</div>
+  <div id="gpIndicator" style="position:absolute;bottom:6px;right:6px;font-size:11px;color:#0af;text-shadow:0 0 6px #0af;display:none;pointer-events:none;">🎮 CONTROLLER CONNECTED</div>
   <div id="center">
     <h1>UNDEFINED FIGHTER</h1>
     <p>
       F-8 vs everything. WASD/Arrows move. <b>E</b> guns. Hold <b>Q</b> near an enemy to lock on,
       release to fire homing missile. <b>F</b> pops a flare to decoy incoming missiles.<br><br>
+      Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, and Shahed drones incoming.
     </p>
     <button id="startBtn">LAUNCH</button>
@@ -279,6 +281,49 @@ const W = canvas.width, H = canvas.height;
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+ 
+// ---------- Gamepad support (PS3 layout) ----------
+// Standard mapping: 0=X(Cross), 1=Circle, 2=Square, 3=Triangle
+// D-pad: 12=up, 13=down, 14=left, 15=right. Left stick: axes[0]=x, axes[1]=y
+let gamepadIndex = null;
+let gamepadPrev = { x:false, o:false, tri:false };
+const GP_DEADZONE = 0.2;
+ 
+window.addEventListener('gamepadconnected', (e) => {
+  gamepadIndex = e.gamepad.index;
+  console.log('%c[GAMEPAD CONNECTED]', 'color:#0f8;font-weight:bold;', e.gamepad.id);
+  const el = document.getElementById('gpIndicator');
+  if(el) el.style.display = 'block';
+});
+window.addEventListener('gamepaddisconnected', (e) => {
+  if(gamepadIndex === e.gamepad.index) gamepadIndex = null;
+  console.log('[GAMEPAD DISCONNECTED]', e.gamepad.id);
+  const el = document.getElementById('gpIndicator');
+  if(el) el.style.display = 'none';
+});
+ 
+function pollGamepad(){
+  if(gamepadIndex === null) return null;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = pads[gamepadIndex];
+  if(!gp) return null;
+ 
+  let mx = 0, my = 0;
+  // left stick
+  if(Math.abs(gp.axes[0]) > GP_DEADZONE) mx = gp.axes[0];
+  if(Math.abs(gp.axes[1]) > GP_DEADZONE) my = gp.axes[1];
+  // d-pad overrides/adds to stick
+  if(gp.buttons[14] && gp.buttons[14].pressed) mx = -1;
+  if(gp.buttons[15] && gp.buttons[15].pressed) mx = 1;
+  if(gp.buttons[12] && gp.buttons[12].pressed) my = -1;
+  if(gp.buttons[13] && gp.buttons[13].pressed) my = 1;
+ 
+  const xBtn = gp.buttons[0] && gp.buttons[0].pressed;   // X = shoot
+  const oBtn = gp.buttons[1] && gp.buttons[1].pressed;   // Circle = missile
+  const triBtn = gp.buttons[3] && gp.buttons[3].pressed; // Triangle = flare
+ 
+  return { mx, my, xBtn, oBtn, triBtn };
+}
  
 let running = false;
 let score = 0, wave = 1;
@@ -404,11 +449,15 @@ function popFlare(){
  
 // ---------- Update ----------
 function updatePlayer(){
+  const gp = pollGamepad();
+ 
   let mx=0,my=0;
   if(keys['w']||keys['arrowup']) my-=1;
   if(keys['s']||keys['arrowdown']) my+=1;
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright']) mx+=1;
+  if(gp){ mx += gp.mx; my += gp.my; }
+  mx = clamp(mx,-1,1); my = clamp(my,-1,1);
   const len = Math.hypot(mx,my)||1;
   player.x += (mx/len)*player.speed;
   player.y += (my/len)*player.speed;
@@ -417,10 +466,15 @@ function updatePlayer(){
  
   if(player.fireCd>0) player.fireCd--;
   if(player.flareCd>0) player.flareCd--;
-  if(keys['e']) tryFireGun();
-  if(keys['f']) popFlare();
  
-  if(keys['q']){
+  const shootHeld = keys['e'] || (gp && gp.xBtn);
+  const missileHeld = keys['q'] || (gp && gp.oBtn);
+  const flarePressed = keys['f'] || (gp && gp.triBtn && !gamepadPrev.tri);
+ 
+  if(shootHeld) tryFireGun();
+  if(flarePressed) popFlare();
+ 
+  if(missileHeld){
     if(!player.lockTarget || !player.lockTarget.alive){
       player.lockTarget = findLockTarget();
       player.lockProgress = 0;
@@ -436,6 +490,8 @@ function updatePlayer(){
       player.lockProgress = 0;
     }
   }
+ 
+  if(gp) gamepadPrev.tri = gp.triBtn;
  
   const lockEl = document.getElementById('lockind');
   lockEl.style.display = (player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
