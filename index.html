@@ -76,7 +76,8 @@
 </style>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
@@ -91,6 +92,28 @@
  
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
+  const auth = getAuth(app);
+  window.__currentUid = null;
+ 
+  onAuthStateChanged(auth, (user) => {
+    window.__currentUid = user ? user.uid : null;
+    if(user){
+      console.log('%c[SIGNED IN]', 'color:#0f8;font-weight:bold;', 'uid:', user.uid, 'email:', user.email);
+    }
+  });
+ 
+  window.__adminSignIn = async function(){
+    try{
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      console.log('%cSigned in as', 'color:#0f8;', result.user.email);
+      console.log('%cYour UID:', 'color:#0f8;font-weight:bold;', result.user.uid);
+      return result.user.uid;
+    } catch(e){
+      console.error('Sign-in failed', e);
+      return null;
+    }
+  };
  
   window.__submitScore = async function(name, score, wave){
     try{
@@ -137,6 +160,28 @@
     } catch(e){
       console.error('check username failed', e);
       return false;
+    }
+  };
+ 
+  window.__adminUpdateEntry = async function(path, changes){
+    try{
+      await update(ref(db, path), changes);
+      return true;
+    } catch(e){
+      console.error('admin update failed', e);
+      return false;
+    }
+  };
+ 
+  window.__adminGetLeaderboardRaw = async function(){
+    try{
+      const snap = await get(ref(db, 'leaderboard'));
+      const rows = [];
+      snap.forEach(child => rows.push({ id: child.key, ...child.val() }));
+      return rows;
+    } catch(e){
+      console.error('fetch raw leaderboard failed', e);
+      return [];
     }
   };
  
@@ -245,7 +290,7 @@ let cheatReason = '';
 let devMode = false;
 let betaUnlocked = false;
 let godMode = false;
-const DEV_PASSWORD = "796f20686f6c6d6573736d656c6c796f756c61746572"; // <-- set your own password here
+const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
  
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
@@ -952,6 +997,10 @@ window.addEventListener('keydown', (e) => {
       console.log('  devTestFlag()          - force-submit a test entry to the flagged node');
       console.log('  devGodMode(true/false) - toggle infinite HP');
       console.log('  devBeta(true/false)    - toggle beta features');
+      console.log('  devSignIn()            - sign in with Google to get admin write access + your UID');
+      console.log('  devEditLb(id, changes) - edit a leaderboard entry, e.g. devEditLb("-Nabc123", {score:500})');
+      console.log('  devFlagTrig(id, reason)- manually flag an existing leaderboard entry by id');
+      console.log('  devGameEdit(opts)      - edit live game state, e.g. devGameEdit({hp:100, flares:5})');
       alert('Dev mode enabled. Check the browser console for available commands.');
       const ind = document.getElementById('devIndicator');
       if(ind) ind.style.display = 'block';
@@ -1003,6 +1052,67 @@ window.devBeta = function(on){
   if(!devMode){ console.warn('Dev mode not active.'); return; }
   betaUnlocked = !!on;
   console.log(`Beta features ${betaUnlocked ? 'UNLOCKED' : 'locked'}.`);
+};
+ 
+window.devSignIn = async function(){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!window.__adminSignIn){ console.warn('Firebase module not loaded yet.'); return; }
+  const uid = await window.__adminSignIn();
+  if(uid) console.log('Signed in. Add this uid to your Firebase rules to unlock admin writes.');
+};
+ 
+window.devEditLb = async function(id, changes){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!id || typeof changes !== 'object'){
+    console.warn('Usage: devEditLb("-Nabc123", {score: 500, name: "newname"})');
+    console.log('Tip: run devListLb() first to see entry ids.');
+    return;
+  }
+  if(!window.__adminUpdateEntry){ console.warn('Firebase module not loaded yet.'); return; }
+  const ok = await window.__adminUpdateEntry('leaderboard/' + id, changes);
+  console.log(ok ? `Entry ${id} updated.` : `Failed to update ${id} — check you're signed in (devSignIn()) and rules allow your uid.`);
+};
+ 
+window.devListLb = async function(){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!window.__adminGetLeaderboardRaw){ console.warn('Firebase module not loaded yet.'); return; }
+  const rows = await window.__adminGetLeaderboardRaw();
+  console.table(rows);
+  return rows;
+};
+ 
+window.devFlagTrig = async function(id, reason){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!id){ console.warn('Usage: devFlagTrig("-Nabc123", "manual review")'); return; }
+  if(!window.__adminGetLeaderboardRaw || !window.__submitFlagged){ console.warn('Firebase module not loaded yet.'); return; }
+  const rows = await window.__adminGetLeaderboardRaw();
+  const entry = rows.find(r => r.id === id);
+  if(!entry){ console.warn('No leaderboard entry found with that id.'); return; }
+  const ok = await window.__submitFlagged(entry.name, entry.score, entry.wave, reason || 'MANUALLY FLAGGED BY ADMIN');
+  console.log(ok ? `Entry ${id} (${entry.name}) flagged.` : 'Failed to submit flag.');
+};
+ 
+window.devGameEdit = function(opts){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!opts || typeof opts !== 'object'){
+    console.warn('Usage: devGameEdit({hp:100, flares:5, spawn:"ufo", clearEnemies:true})');
+    return;
+  }
+  if(typeof opts.hp === 'number'){ player.hp = clamp(opts.hp, 0, player.maxHp); console.log('HP set to', player.hp); }
+  if(typeof opts.flares === 'number'){
+    player.flares = Math.max(0, opts.flares);
+    const el = document.getElementById('flarecount');
+    if(el) el.textContent = player.flares;
+    console.log('Flares set to', player.flares);
+  }
+  if(opts.spawn && typeof spawnEnemy === 'function'){
+    spawnEnemy(opts.spawn);
+    console.log('Spawned enemy:', opts.spawn);
+  }
+  if(opts.clearEnemies){
+    enemies = [];
+    console.log('Cleared all enemies.');
+  }
 };
  
 // ---------- Username handling ----------
