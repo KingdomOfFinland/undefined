@@ -77,7 +77,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-
+ 
   const firebaseConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
     authDomain: "undefined-fighter.firebaseapp.com",
@@ -88,22 +88,23 @@
     appId: "1:29093275337:web:6ae96c4371ad5fd4b88f18",
     measurementId: "G-KNEH4SXY4N"
   };
-
+ 
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
-
+ 
   window.__submitScore = async function(name, score, wave){
     try{
       const lbRef = ref(db, 'leaderboard');
       const newEntryRef = push(lbRef);
-      await set(newEntryRef, { name: name.slice(0,12), score, wave, ts: Date.now() });
+      const now = Date.now();
+      await set(newEntryRef, { name: name.slice(0,12), score, wave, ts: now, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
       return true;
     } catch(e){
       console.error('score submit failed', e);
       return false;
     }
   };
-
+ 
   window.__submitFlagged = async function(name, score, wave, reason){
     try{
       let ip = 'unknown';
@@ -112,17 +113,18 @@
         const j = await res.json();
         ip = j.ip || 'unknown';
       } catch(e){ /* ip lookup optional, don't block on failure */ }
-
+ 
       const flagRef = ref(db, 'flagged');
       const newEntryRef = push(flagRef);
-      await set(newEntryRef, { name: name.slice(0,12), score, wave, ip, reason, ts: Date.now() });
+      const now = Date.now();
+      await set(newEntryRef, { name: name.slice(0,12), score, wave, ip, reason, ts: now, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
       return true;
     } catch(e){
       console.error('flag submit failed', e);
       return false;
     }
   };
-
+ 
   window.__fetchTop = async function(n=10){
     try{
       const lbRef = ref(db, 'leaderboard');
@@ -137,7 +139,7 @@
       return [];
     }
   };
-
+ 
   window.__fetchFlagged = async function(n=10){
     try{
       const flagRef = ref(db, 'flagged');
@@ -153,7 +155,7 @@
     }
   };
 </script>
-
+ 
 </head>
 <body>
 <div id="wrap">
@@ -187,16 +189,16 @@
     </div>
   </div>
 </div>
-
+ 
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
-
+ 
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-
+ 
 let running = false;
 let score = 0, wave = 1;
 let frame = 0;
@@ -204,11 +206,11 @@ let shakeT = 0;
 let scoreLog = []; // {delta, ts} for anti-cheat detection
 let cheatFlagged = false;
 let cheatReason = '';
-
+ 
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
-
+ 
 // ---------- Player ----------
 const player = {
   x: W/2, y: H-90, vx:0, vy:0, angle:-Math.PI/2,
@@ -219,7 +221,7 @@ const player = {
   lockTarget: null, lockProgress: 0,
   alive: true
 };
-
+ 
 let bullets = [];      // player guns
 let enemyBullets = [];
 let missiles = [];      // homing missiles (player + enemy), tagged .side
@@ -227,7 +229,7 @@ let enemies = [];
 let flares = [];
 let particles = [];
 let bombs = [];
-
+ 
 function spawnParticles(x,y,color,n=12,speed=3){
   for(let i=0;i<n;i++){
     particles.push({
@@ -236,7 +238,7 @@ function spawnParticles(x,y,color,n=12,speed=3){
     });
   }
 }
-
+ 
 // ---------- Enemy factory ----------
 function spawnEnemy(type){
   const base = { type, x: rand(60,W-60), y: -50, hp:1, maxHp:1, alive:true,
@@ -254,7 +256,7 @@ function spawnEnemy(type){
   }
   enemies.push(base);
 }
-
+ 
 function waveComposition(w){
   const list = [];
   const fighters = Math.min(2+Math.floor(w/2), 6);
@@ -266,7 +268,7 @@ function waveComposition(w){
   if(w%4===0) list.push('spaceship');
   return list;
 }
-
+ 
 let spawnQueue = [];
 let spawnTimer = 0;
 function startWave(w){
@@ -277,7 +279,7 @@ function startWave(w){
   el.style.opacity = 1;
   setTimeout(()=>{ el.style.opacity = 0; }, 1600);
 }
-
+ 
 // ---------- Input actions ----------
 function tryFireGun(){
   if(player.fireCd>0) return;
@@ -286,7 +288,7 @@ function tryFireGun(){
   bullets.push({ x:player.x-14, y:player.y-8, vx:-1, vy:-11, w:3,h:8, side:'player' });
   bullets.push({ x:player.x+14, y:player.y-8, vx:1, vy:-11, w:3,h:8, side:'player' });
 }
-
+ 
 function findLockTarget(){
   let best = null, bestD = 420;
   for(const e of enemies){
@@ -296,7 +298,7 @@ function findLockTarget(){
   }
   return best;
 }
-
+ 
 function fireMissile(){
   if(!player.lockTarget || !player.lockTarget.alive) return;
   missiles.push({
@@ -306,7 +308,7 @@ function fireMissile(){
   player.lockTarget = null;
   player.lockProgress = 0;
 }
-
+ 
 function popFlare(){
   if(player.flares<=0 || player.flareCd>0) return;
   player.flares--;
@@ -314,7 +316,7 @@ function popFlare(){
   flares.push({ x:player.x, y:player.y+10, life:90, maxLife:90 });
   document.getElementById('flarecount').textContent = player.flares;
 }
-
+ 
 // ---------- Update ----------
 function updatePlayer(){
   let mx=0,my=0;
@@ -327,12 +329,12 @@ function updatePlayer(){
   player.y += (my/len)*player.speed;
   player.x = clamp(player.x, 20, W-20);
   player.y = clamp(player.y, 20, H-20);
-
+ 
   if(player.fireCd>0) player.fireCd--;
   if(player.flareCd>0) player.flareCd--;
   if(keys['e']) tryFireGun();
   if(keys['f']) popFlare();
-
+ 
   if(keys['q']){
     if(!player.lockTarget || !player.lockTarget.alive){
       player.lockTarget = findLockTarget();
@@ -349,11 +351,11 @@ function updatePlayer(){
       player.lockProgress = 0;
     }
   }
-
+ 
   const lockEl = document.getElementById('lockind');
   lockEl.style.display = (player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
 }
-
+ 
 function updateBullets(){
   bullets = bullets.filter(b=>{
     b.x+=b.vx; b.y+=b.vy;
@@ -364,12 +366,12 @@ function updateBullets(){
     return b.y>-20 && b.y<H+20 && b.x>-20 && b.x<W+20;
   });
 }
-
+ 
 function updateMissiles(){
   missiles = missiles.filter(m=>{
     m.life--;
     if(m.life<=0) return false;
-
+ 
     // retarget to nearby flare if player missile targeting... actually flares decoy ENEMY missiles
     if(m.side==='enemy'){
       let decoy = null, bd=90;
@@ -405,11 +407,11 @@ function updateMissiles(){
     return m.x>-40 && m.x<W+40 && m.y>-40 && m.y<H+40;
   });
 }
-
+ 
 function updateFlares(){
   flares = flares.filter(f=>{ f.life--; return f.life>0; });
 }
-
+ 
 function updateBombs(){
   bombs = bombs.filter(b=>{
     b.y += b.vy;
@@ -423,7 +425,7 @@ function updateBombs(){
     return true;
   });
 }
-
+ 
 function updateEnemies(){
   // spawn logic
   spawnTimer--;
@@ -431,11 +433,11 @@ function updateEnemies(){
     spawnEnemy(spawnQueue.shift());
     spawnTimer = 40;
   }
-
+ 
   for(const e of enemies){
     if(!e.alive) continue;
     e.phase += 0.05;
-
+ 
     if(e.type==='ufo'){
       e.x += Math.sin(e.phase)*2.4;
       if(e.y<100) e.y += e.speed;
@@ -502,41 +504,43 @@ function updateEnemies(){
         spawnParticles(e.x,e.y,'#f44',20,4); shakeT=8;
       }
     }
-
+ 
     if(e.y>H+60) e.alive=false;
   }
   enemies = enemies.filter(e=>e.alive || e.hp>0);
   enemies = enemies.filter(e=>e.alive);
 }
-
+ 
 function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
-
+ 
 function addScore(amount){
   const now = performance.now();
-
+ 
   // condition 1: single gain over 600
   if(amount > 600){
     cheatFlagged = true;
-    cheatReason = 'DEVTOOLS/HACK USED';
+    cheatReason = 'DEVTOOLS/HACK USED (single gain > 600)';
   }
-
-  // condition 2: gains happening too fast (0.001s-0.1s apart)
+ 
+  // condition 2: gains happening suspiciously fast, but ignore same-frame kills
+  // (multiple enemies dying in the same collision pass is normal gameplay)
   if(scoreLog.length){
     const last = scoreLog[scoreLog.length-1];
     const gap = (now - last.ts) / 1000; // seconds
-    if(gap >= 0.001 && gap <= 0.1){
+    const sameFrame = last.frame === frame;
+    if(!sameFrame && gap >= 0.001 && gap <= 0.1){
       cheatFlagged = true;
-      cheatReason = 'DEVTOOLS/HACK USED';
+      cheatReason = 'DEVTOOLS/HACK USED (score rate anomaly)';
     }
   }
-
-  scoreLog.push({ delta: amount, ts: now });
+ 
+  scoreLog.push({ delta: amount, ts: now, frame });
   if(scoreLog.length > 50) scoreLog.shift();
-
+ 
   score += amount;
   document.getElementById('score').textContent = score;
 }
-
+ 
 function updateCollisions(){
   // player bullets vs enemies
   for(const b of bullets){
@@ -555,7 +559,7 @@ function updateCollisions(){
     }
   }
   bullets = bullets.filter(b=>!b.dead);
-
+ 
   // player missiles vs enemies
   for(const m of missiles){
     if(m.side!=='player') continue;
@@ -574,7 +578,7 @@ function updateCollisions(){
     }
   }
   missiles = missiles.filter(m=>!m.dead);
-
+ 
   // enemy bullets vs player
   for(const b of enemyBullets){
     if(circleHit(b,player,4,14)){
@@ -583,7 +587,7 @@ function updateCollisions(){
     }
   }
   enemyBullets = enemyBullets.filter(b=>!b.dead);
-
+ 
   // enemy missiles vs player
   for(const m of missiles){
     if(m.side!=='enemy') continue;
@@ -600,17 +604,17 @@ function updateCollisions(){
     }
   }
   missiles = missiles.filter(m=>!m.dead);
-
+ 
   // drone collision handled in updateEnemies
 }
-
+ 
 function updateParticles(){
   particles = particles.filter(p=>{
     p.x+=p.vx; p.y+=p.vy; p.life--;
     return p.life>0;
   });
 }
-
+ 
 // ---------- Draw ----------
 function drawPlayer(){
   ctx.save();
@@ -639,7 +643,7 @@ function drawPlayer(){
   }
   ctx.restore();
 }
-
+ 
 function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x,e.y);
@@ -672,7 +676,7 @@ function drawEnemy(e){
     ctx.closePath(); ctx.fill(); ctx.stroke();
   }
   ctx.restore();
-
+ 
   // hp bar
   if(e.hp<e.maxHp){
     ctx.fillStyle='#300';
@@ -681,14 +685,14 @@ function drawEnemy(e){
     ctx.fillRect(e.x-e.w/2, e.y-e.h/2-10, e.w*(e.hp/e.maxHp), 4);
   }
 }
-
+ 
 function drawBullets(){
   ctx.fillStyle='#8ff';
   for(const b of bullets) ctx.fillRect(b.x-b.w/2,b.y-b.h/2,b.w,b.h);
   ctx.fillStyle='#fc6';
   for(const b of enemyBullets){ ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill(); }
 }
-
+ 
 function drawMissiles(){
   for(const m of missiles){
     ctx.save();
@@ -699,7 +703,7 @@ function drawMissiles(){
     ctx.restore();
   }
 }
-
+ 
 function drawFlares(){
   for(const f of flares){
     const a = f.life/f.maxLife;
@@ -707,7 +711,7 @@ function drawFlares(){
     ctx.beginPath(); ctx.arc(f.x,f.y,6+(1-a)*10,0,Math.PI*2); ctx.fill();
   }
 }
-
+ 
 function drawParticles(){
   for(const p of particles){
     ctx.globalAlpha = p.life/p.maxLife;
@@ -716,12 +720,12 @@ function drawParticles(){
   }
   ctx.globalAlpha = 1;
 }
-
+ 
 function drawBombs(){
   ctx.fillStyle='#333';
   for(const b of bombs){ ctx.beginPath(); ctx.arc(b.x,b.y,5,0,Math.PI*2); ctx.fill(); }
 }
-
+ 
 function drawLockLine(){
   if(player.lockTarget && player.lockTarget.alive){
     const t = player.lockTarget;
@@ -736,7 +740,7 @@ function drawLockLine(){
     ctx.stroke();
   }
 }
-
+ 
 function drawStars(){
   ctx.fillStyle='rgba(255,255,255,0.5)';
   for(let i=0;i<60;i++){
@@ -745,7 +749,7 @@ function drawStars(){
     ctx.fillRect(sx,sy,1.5,1.5);
   }
 }
-
+ 
 function render(){
   ctx.save();
   if(shakeT>0){
@@ -764,46 +768,46 @@ function render(){
   drawParticles();
   ctx.restore();
 }
-
+ 
 // ---------- Game loop ----------
 function updateHud(){
   document.getElementById('hpbar').style.width = clamp(player.hp,0,100)+'%';
   document.getElementById('wave').textContent = wave;
 }
-
+ 
 function checkWaveEnd(){
   if(spawnQueue.length===0 && enemies.length===0){
     wave++;
     startWave(wave);
   }
 }
-
+ 
 function renderLeaderboard(rows){
   const el = document.getElementById('lbList');
   if(!rows.length){ el.innerHTML = '<li>No scores yet — be the first</li>'; return; }
   el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>${r.score} (wv${r.wave})</span></li>`).join('');
 }
-
+ 
 function renderFlagged(rows){
   const el = document.getElementById('flagList');
   if(!el) return;
   if(!rows.length){ el.innerHTML = ''; el.parentElement.style.display='none'; return; }
   el.parentElement.style.display='block';
-  el.innerHTML = rows.map(r=>`<li><span>🚩 ${r.name} (${r.ip||'?'})</span><span>${r.score}</span></li>`).join('');
+  el.innerHTML = rows.map(r=>`<li><span>🚩 ${r.name} (${r.ip||'?'})</span><span>${r.score} · ${r.dateStr||''}</span></li>`).join('');
 }
-
+ 
 async function loadFlagged(){
   if(!window.__fetchFlagged) return;
   const rows = await window.__fetchFlagged(10);
   renderFlagged(rows);
 }
-
+ 
 async function loadLeaderboard(){
   if(!window.__fetchTop){ setTimeout(loadLeaderboard, 300); return; }
   const rows = await window.__fetchTop(10);
   renderLeaderboard(rows);
 }
-
+ 
 function gameOver(){
   running = false;
   const center = document.getElementById('center');
@@ -853,7 +857,7 @@ function gameOver(){
     }
   };
 }
-
+ 
 function loop(){
   if(!running) return;
   frame++;
@@ -871,7 +875,7 @@ function loop(){
   if(player.hp<=0){ gameOver(); return; }
   requestAnimationFrame(loop);
 }
-
+ 
 function resetGame(){
   ensureUsername();
   score=0; wave=1;
@@ -886,11 +890,11 @@ function resetGame(){
   running = true;
   requestAnimationFrame(loop);
 }
-
+ 
 document.getElementById('startBtn').onclick = resetGame;
 loadLeaderboard();
 loadFlagged();
-
+ 
 // ---------- Username handling ----------
 function getUsername(){
   return localStorage.getItem('uf_username') || '';
@@ -910,3 +914,4 @@ function ensureUsername(){
 </script>
 </body>
 </html>
+ 
