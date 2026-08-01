@@ -793,7 +793,7 @@ function renderFlagged(rows){
   if(!el) return;
   if(!rows.length){ el.innerHTML = ''; el.parentElement.style.display='none'; return; }
   el.parentElement.style.display='block';
-  el.innerHTML = rows.map(r=>`<li><span>🚩 ${r.name} (${r.ip||'?'})</span><span>${r.score} · ${r.dateStr||''}</span></li>`).join('');
+  el.innerHTML = rows.map(r=>`<li><span>🚩 ${r.name}</span><span>${r.score} · ${r.dateStr||''}</span></li>`).join('');
 }
  
 async function loadFlagged(){
