@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -90,6 +89,31 @@
     background:#0af; color:#001;
   }
   .oskKey.oskWide { grid-column:span 3; }
+  #skinsOverlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,5,10,0.97); display:flex; flex-direction:column;
+    align-items:center; gap:10px; z-index:60; padding:16px; overflow-y:auto;
+  }
+  .skinTabs { display:flex; gap:8px; }
+  .skinTab {
+    background:#0a2a35; color:#8cf; border:1px solid #145; padding:6px 14px;
+    font-family:inherit; font-size:12px; cursor:pointer;
+  }
+  .skinTab.active { background:#0af; color:#001; }
+  #skinsGrid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr));
+    gap:10px; width:100%; max-width:640px;
+  }
+  .skinCard {
+    background:#0a1a22; border:2px solid #145; padding:10px; text-align:center;
+    cursor:pointer; position:relative;
+  }
+  .skinCard.equipped { border-color:#0f8; box-shadow:0 0 10px rgba(0,255,150,0.5); }
+  .skinCard.locked { opacity:0.45; cursor:not-allowed; }
+  .skinCard canvas { display:block; margin:0 auto 6px; }
+  .skinCard .skinName { font-size:11px; color:#cdeaff; }
+  .skinCard .skinReq { font-size:9px; color:#f88; margin-top:2px; }
+  .skinCard .skinEquippedTag { font-size:9px; color:#0f8; margin-top:2px; }
   #wavecall {
     position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
     font-size:22px; color:#f55; text-shadow:0 0 10px #f00; pointer-events:none;
@@ -286,6 +310,7 @@
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, and Shahed drones incoming.
     </p>
     <button id="startBtn">LAUNCH</button>
+    <button id="skinsBtnStart">SKINS</button>
     <h2 style="font-size:14px;color:#0ff;margin-top:10px;">TOP PILOTS</h2>
     <ul id="lbList"><li>Loading...</li></ul>
     <div id="flagSection" style="display:none;">
@@ -375,6 +400,7 @@ let shakeT = 0;
 let scoreLog = []; // {delta, ts} for anti-cheat detection
 let cheatFlagged = false;
 let cheatReason = '';
+let killsThisRun = 0;
 let devMode = false;
 let betaUnlocked = false;
 let godMode = false;
@@ -384,7 +410,241 @@ function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
  
-// ---------- Player ----------
+// ---------- Skin System ----------
+// Each ship skin has: id, name, unlock condition (type/value), and a draw(ctx, thrusting) function
+// drawn in local ship space (nose pointing up/-y, roughly -20..20 in each axis)
+ 
+function drawThruster(ctx, thrusting, color){
+  if(!thrusting) return;
+  ctx.fillStyle = color || 'rgba(255,150,0,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(-4,18); ctx.lineTo(0,18+rand(6,14)); ctx.lineTo(4,18);
+  ctx.fill();
+}
+ 
+const SHIP_SKINS = [
+  { id:'default', name:'F-8 Standard', unlock:{type:'default'}, draw(ctx,th){
+    ctx.fillStyle='#7fd8ff'; ctx.strokeStyle='#0ff'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#0ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th);
+  }},
+  { id:'crimson', name:'Crimson Hawk', unlock:{type:'score', value:1000}, draw(ctx,th){
+    ctx.fillStyle='#ff3355'; ctx.strokeStyle='#ff99aa'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffcc00'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(255,60,60,0.85)');
+  }},
+  { id:'ghost', name:'Ghost Protocol', unlock:{type:'score', value:3000}, draw(ctx,th){
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle='#cfe9ff'; ctx.strokeStyle='#fff'; ctx.lineWidth=1.2;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1;
+    drawThruster(ctx,th,'rgba(200,230,255,0.6)');
+  }},
+  { id:'goldrush', name:'Gold Rush', unlock:{type:'score', value:8000}, draw(ctx,th){
+    ctx.fillStyle='#ffd23f'; ctx.strokeStyle='#fff2b0'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#b8860b'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(255,215,0,0.85)');
+  }},
+  { id:'voidwalker', name:'Voidwalker', unlock:{type:'score', value:15000}, draw(ctx,th){
+    ctx.fillStyle='#1a0a2e'; ctx.strokeStyle='#a855f7'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-22); ctx.lineTo(12,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-12,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#c084fc'; ctx.fillRect(-20,2,12,4); ctx.fillRect(8,2,12,4);
+    drawThruster(ctx,th,'rgba(168,85,247,0.85)');
+  }},
+  { id:'stormbreaker', name:'Stormbreaker', unlock:{type:'wave', value:5}, draw(ctx,th){
+    ctx.fillStyle='#4a90a4'; ctx.strokeStyle='#a8e6ff'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-18); ctx.lineTo(14,6); ctx.lineTo(6,6); ctx.lineTo(6,18);
+    ctx.lineTo(-6,18); ctx.lineTo(-6,6); ctx.lineTo(-14,6);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e8faff'; ctx.fillRect(-2,-14,4,10);
+    drawThruster(ctx,th,'rgba(100,200,255,0.8)');
+  }},
+  { id:'ironwing', name:'Ironwing', unlock:{type:'wave', value:10}, draw(ctx,th){
+    ctx.fillStyle='#555a5e'; ctx.strokeStyle='#ccc'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(16,12); ctx.lineTo(4,6); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,6); ctx.lineTo(-16,12);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ff6600'; ctx.fillRect(-3,-16,6,6);
+    drawThruster(ctx,th,'rgba(150,150,150,0.8)');
+  }},
+  { id:'skyreaper', name:'Sky Reaper', unlock:{type:'wave', value:15}, draw(ctx,th){
+    ctx.fillStyle='#0d0d0d'; ctx.strokeStyle='#ff2222'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-22); ctx.lineTo(13,12); ctx.lineTo(3,4); ctx.lineTo(3,18);
+    ctx.lineTo(-3,18); ctx.lineTo(-3,4); ctx.lineTo(-13,12);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ff2222'; ctx.fillRect(-1,-20,2,14);
+    drawThruster(ctx,th,'rgba(255,20,20,0.9)');
+  }},
+  { id:'ace100', name:'Centurion', unlock:{type:'kills', value:100}, draw(ctx,th){
+    ctx.fillStyle='#2b6e4f'; ctx.strokeStyle='#7be0a8'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffd700';
+    ctx.beginPath(); ctx.arc(0,0,3,0,Math.PI*2); ctx.fill();
+    drawThruster(ctx,th,'rgba(123,224,168,0.85)');
+  }},
+  { id:'ace300', name:'Ace of Skies', unlock:{type:'kills', value:300}, draw(ctx,th){
+    ctx.fillStyle='#1b1b3a'; ctx.strokeStyle='#ffd700'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-21); ctx.lineTo(11,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-11,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffd700'; ctx.fillRect(-16,3,8,3); ctx.fillRect(8,3,8,3);
+    ctx.beginPath(); ctx.arc(0,-2,3,0,Math.PI*2); ctx.fill();
+    drawThruster(ctx,th,'rgba(255,215,0,0.9)');
+  }},
+  { id:'ace1000', name:'Legend', unlock:{type:'kills', value:1000}, draw(ctx,th){
+    const grad = ctx.createLinearGradient(0,-22,0,18);
+    grad.addColorStop(0,'#ff00cc'); grad.addColorStop(0.5,'#00e5ff'); grad.addColorStop(1,'#ffee00');
+    ctx.fillStyle=grad; ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-22); ctx.lineTo(13,11); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-13,11);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    drawThruster(ctx,th,'rgba(255,255,255,0.9)');
+  }},
+  { id:'arctic', name:'Arctic Fox', unlock:{type:'score', value:20000}, draw(ctx,th){
+    ctx.fillStyle='#eef7ff'; ctx.strokeStyle='#89c4f4'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#4a90d9'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(137,196,244,0.85)');
+  }},
+  { id:'magma', name:'Magma Core', unlock:{type:'wave', value:20}, draw(ctx,th){
+    ctx.fillStyle='#1a0800'; ctx.strokeStyle='#ff6a00'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-21); ctx.lineTo(12,11); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-12,11);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ff6a00'; ctx.fillRect(-2,-17,4,12);
+    drawThruster(ctx,th,'rgba(255,106,0,0.95)');
+  }},
+  { id:'stealth', name:'Nightshade', unlock:{type:'kills', value:500}, draw(ctx,th){
+    ctx.fillStyle='#0a0a0f'; ctx.strokeStyle='#333'; ctx.lineWidth=1.2;
+    ctx.beginPath();
+    ctx.moveTo(0,-19); ctx.lineTo(15,9); ctx.lineTo(3,7); ctx.lineTo(3,18);
+    ctx.lineTo(-3,18); ctx.lineTo(-3,7); ctx.lineTo(-15,9);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#4a4a55'; ctx.fillRect(-1,-15,2,8);
+    drawThruster(ctx,th,'rgba(80,80,90,0.7)');
+  }},
+  { id:'aurora', name:'Aurora', unlock:{type:'score', value:30000}, draw(ctx,th){
+    const grad = ctx.createLinearGradient(-12,0,12,0);
+    grad.addColorStop(0,'#00ffa8'); grad.addColorStop(0.5,'#00c8ff'); grad.addColorStop(1,'#a855f7');
+    ctx.fillStyle=grad; ctx.strokeStyle='#fff'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    drawThruster(ctx,th,'rgba(0,255,200,0.85)');
+  }},
+  { id:'veteran', name:'Veteran Wing', unlock:{type:'wave', value:25}, draw(ctx,th){
+    ctx.fillStyle='#3a3a2a'; ctx.strokeStyle='#c9b458'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(11,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-11,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    for(let i=0;i<3;i++){ ctx.fillStyle='#c9b458'; ctx.fillRect(-3+i*3,-16,2,4); }
+    drawThruster(ctx,th,'rgba(201,180,88,0.8)');
+  }}
+];
+ 
+const BULLET_SKINS = [
+  { id:'default', name:'Standard', unlock:{type:'default'}, color:'#8ff' },
+  { id:'ember', name:'Ember', unlock:{type:'score', value:2000}, color:'#ff8844' },
+  { id:'toxic', name:'Toxic', unlock:{type:'wave', value:6}, color:'#7fff44' },
+  { id:'plasma', name:'Plasma', unlock:{type:'kills', value:200}, color:'#ff44ff' },
+  { id:'gold', name:'Golden Rounds', unlock:{type:'score', value:12000}, color:'#ffd700' }
+];
+ 
+const MISSILE_SKINS = [
+  { id:'default', name:'Standard', unlock:{type:'default'}, color:'#5cf' },
+  { id:'inferno', name:'Inferno', unlock:{type:'score', value:5000}, color:'#ff4400' },
+  { id:'frost', name:'Frost', unlock:{type:'wave', value:8}, color:'#aeefff' },
+  { id:'shadow', name:'Shadow', unlock:{type:'kills', value:400}, color:'#8844ff' },
+  { id:'radiant', name:'Radiant', unlock:{type:'score', value:25000}, color:'#ffee00' }
+];
+ 
+const FLARE_SKINS = [
+  { id:'default', name:'Standard', unlock:{type:'default'}, color:'255,170,0' },
+  { id:'cool', name:'Coolant', unlock:{type:'wave', value:7}, color:'0,200,255' },
+  { id:'royal', name:'Royal', unlock:{type:'kills', value:250}, color:'180,80,255' }
+];
+ 
+function getStats(){
+  try{
+    return JSON.parse(localStorage.getItem('uf_stats')) || { bestScore:0, bestWave:0, totalKills:0 };
+  } catch(e){
+    return { bestScore:0, bestWave:0, totalKills:0 };
+  }
+}
+function saveStats(stats){
+  localStorage.setItem('uf_stats', JSON.stringify(stats));
+}
+function updateStats({finalScore, finalWave, killsThisRun}){
+  const stats = getStats();
+  stats.bestScore = Math.max(stats.bestScore, finalScore||0);
+  stats.bestWave = Math.max(stats.bestWave, finalWave||0);
+  stats.totalKills = (stats.totalKills||0) + (killsThisRun||0);
+  saveStats(stats);
+  return stats;
+}
+ 
+function isSkinUnlocked(skin, stats){
+  if(skin.unlock.type === 'default') return true;
+  if(skin.unlock.type === 'score') return stats.bestScore >= skin.unlock.value;
+  if(skin.unlock.type === 'wave') return stats.bestWave >= skin.unlock.value;
+  if(skin.unlock.type === 'kills') return stats.totalKills >= skin.unlock.value;
+  return false;
+}
+ 
+function unlockRequirementText(skin){
+  if(skin.unlock.type === 'default') return 'Unlocked';
+  if(skin.unlock.type === 'score') return `Reach ${skin.unlock.value} score`;
+  if(skin.unlock.type === 'wave') return `Survive to wave ${skin.unlock.value}`;
+  if(skin.unlock.type === 'kills') return `${skin.unlock.value} total kills`;
+  return '';
+}
+ 
+function getEquippedSkins(){
+  return {
+    ship: localStorage.getItem('uf_skin_ship') || 'default',
+    bullet: localStorage.getItem('uf_skin_bullet') || 'default',
+    missile: localStorage.getItem('uf_skin_missile') || 'default',
+    flare: localStorage.getItem('uf_skin_flare') || 'default'
+  };
+}
+function setEquippedSkin(category, id){
+  localStorage.setItem('uf_skin_' + category, id);
+}
+function getSkinById(list, id){
+  return list.find(s => s.id === id) || list[0];
+}
 const player = {
   x: W/2, y: H-90, vx:0, vy:0, angle:-Math.PI/2,
   w: 34, h: 30, speed: 5.2,
@@ -698,6 +958,7 @@ function updateEnemies(){
 function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
  
 function addScore(amount){
+  killsThisRun++;
   const now = performance.now();
  
   // condition: single gain over 600 (max legit single kill is the 600-pt spaceship boss)
@@ -791,28 +1052,10 @@ function updateParticles(){
 function drawPlayer(){
   ctx.save();
   ctx.translate(player.x, player.y);
-  ctx.fillStyle = '#7fd8ff';
-  ctx.strokeStyle = '#0ff';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0,-20);
-  ctx.lineTo(10,10);
-  ctx.lineTo(4,8);
-  ctx.lineTo(4,18);
-  ctx.lineTo(-4,18);
-  ctx.lineTo(-4,8);
-  ctx.lineTo(-10,10);
-  ctx.closePath();
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle='#0ff';
-  ctx.fillRect(-18,2,10,4);
-  ctx.fillRect(8,2,10,4);
-  if(keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']){
-    ctx.fillStyle='rgba(255,150,0,0.8)';
-    ctx.beginPath();
-    ctx.moveTo(-4,18); ctx.lineTo(0,18+rand(6,14)); ctx.lineTo(4,18);
-    ctx.fill();
-  }
+  const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright'];
+  const equipped = getEquippedSkins();
+  const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
+  shipSkin.draw(ctx, thrusting);
   ctx.restore();
 }
  
@@ -859,27 +1102,33 @@ function drawEnemy(e){
 }
  
 function drawBullets(){
-  ctx.fillStyle='#8ff';
+  const equipped = getEquippedSkins();
+  const bulletColor = getSkinById(BULLET_SKINS, equipped.bullet).color;
+  ctx.fillStyle = bulletColor;
   for(const b of bullets) ctx.fillRect(b.x-b.w/2,b.y-b.h/2,b.w,b.h);
   ctx.fillStyle='#fc6';
   for(const b of enemyBullets){ ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill(); }
 }
  
 function drawMissiles(){
+  const equipped = getEquippedSkins();
+  const missileColor = getSkinById(MISSILE_SKINS, equipped.missile).color;
   for(const m of missiles){
     ctx.save();
     ctx.translate(m.x,m.y);
     ctx.rotate(Math.atan2(m.vy,m.vx)+Math.PI/2);
-    ctx.fillStyle = m.side==='player' ? '#5cf' : '#f74';
+    ctx.fillStyle = m.side==='player' ? missileColor : '#f74';
     ctx.fillRect(-3,-8,6,16);
     ctx.restore();
   }
 }
  
 function drawFlares(){
+  const equipped = getEquippedSkins();
+  const flareColor = getSkinById(FLARE_SKINS, equipped.flare).color;
   for(const f of flares){
     const a = f.life/f.maxLife;
-    ctx.fillStyle = `rgba(255,170,0,${a})`;
+    ctx.fillStyle = `rgba(${flareColor},${a})`;
     ctx.beginPath(); ctx.arc(f.x,f.y,6+(1-a)*10,0,Math.PI*2); ctx.fill();
   }
 }
@@ -986,13 +1235,25 @@ function gameOver(){
   const center = document.getElementById('center');
   center.classList.remove('hidden');
   const savedName = getUsername() || 'PILOT';
+ 
+  const beforeStats = getStats();
+  const afterStats = updateStats({ finalScore: score, finalWave: wave, killsThisRun });
+  const allSkins = [...SHIP_SKINS, ...BULLET_SKINS, ...MISSILE_SKINS, ...FLARE_SKINS];
+  const newlyUnlocked = allSkins.filter(s => !isSkinUnlocked(s, beforeStats) && isSkinUnlocked(s, afterStats));
+ 
+  const unlockHtml = newlyUnlocked.length
+    ? `<div style="color:#0f8;font-size:12px;margin-top:6px;">🔓 New skin${newlyUnlocked.length>1?'s':''} unlocked: ${newlyUnlocked.map(s=>s.name).join(', ')}</div>`
+    : '';
+ 
   center.innerHTML = `
     <h1 style="color:#f55;text-shadow:0 0 12px #f00;">SHOT DOWN</h1>
     <p>Final score: <b>${score}</b> — Reached wave ${wave}</p>
+    ${unlockHtml}
     <input id="nameInput" maxlength="12" value="${savedName}">
     <a href="#" id="changeNameLink" style="font-size:11px;color:#8cf;">change callsign</a>
     <button id="submitScoreBtn">SUBMIT SCORE</button>
     <button id="restartBtn">RELAUNCH</button>
+    <button id="skinsBtnGO">SKINS</button>
     <h2 style="font-size:14px;color:#0ff;margin-top:6px;">TOP PILOTS</h2>
     <ul id="lbList"><li>Loading...</li></ul>
     <div id="flagSection" style="display:none;">
@@ -1003,6 +1264,7 @@ function gameOver(){
   loadLeaderboard();
   loadFlagged();
   document.getElementById('restartBtn').onclick = resetGame;
+  document.getElementById('skinsBtnGO').onclick = () => openSkinsScreen();
   document.getElementById('changeNameLink').onclick = (e) => {
     e.preventDefault();
     const nameEl = document.getElementById('nameInput');
@@ -1071,7 +1333,7 @@ function loop(){
 async function resetGame(){
   await ensureUsername();
   score=0; wave=1;
-  scoreLog = []; cheatFlagged = false; cheatReason = '';
+  scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
   player.hp=100; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[];
@@ -1084,6 +1346,7 @@ async function resetGame(){
 }
  
 document.getElementById('startBtn').onclick = resetGame;
+document.getElementById('skinsBtnStart').onclick = () => openSkinsScreen();
 loadLeaderboard();
 loadFlagged();
  
@@ -1278,7 +1541,13 @@ let navPrev = { up:false, down:false, left:false, right:false, x:false };
 let navFocusIndex = 0;
  
 function getNavTargets(){
-  // any visible, enabled button/link inside #center that isn't display:none
+  // if the skins overlay is open, navigate within it instead (it sits on top)
+  const skinsOverlay = document.getElementById('skinsOverlay');
+  if(skinsOverlay){
+    const all = Array.from(skinsOverlay.querySelectorAll('button, .skinTab, .skinCard:not(.locked)'));
+    return all.filter(el => window.getComputedStyle(el).display !== 'none');
+  }
+  // otherwise, any visible, enabled button/link inside #center that isn't display:none
   const container = document.getElementById('center');
   if(!container || container.classList.contains('hidden')) return [];
   const all = Array.from(container.querySelectorAll('button, a[href="#"]'));
@@ -1309,7 +1578,8 @@ function navGamepadTick(){
   if(!gp) return;
  
   const center = document.getElementById('center');
-  const uiOpen = center && !center.classList.contains('hidden');
+  const skinsOverlay = document.getElementById('skinsOverlay');
+  const uiOpen = skinsOverlay || (center && !center.classList.contains('hidden'));
   if(!uiOpen) return;
  
   const targets = getNavTargets();
@@ -1338,7 +1608,115 @@ function navGamepadTick(){
 }
 navGamepadTick();
  
-// ---------- On-screen keyboard (for controller callsign entry) ----------
+// ---------- Skins Selection Screen ----------
+function openSkinsScreen(){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'skinsOverlay';
+ 
+  const categories = [
+    { key:'ship', label:'SHIP', list:SHIP_SKINS },
+    { key:'bullet', label:'BULLETS', list:BULLET_SKINS },
+    { key:'missile', label:'MISSILES', list:MISSILE_SKINS },
+    { key:'flare', label:'FLARES', list:FLARE_SKINS }
+  ];
+  let activeCat = 'ship';
+ 
+  overlay.innerHTML = `
+    <h1 style="font-size:22px;color:#0ff;text-shadow:0 0 10px #0ff;">HANGAR</h1>
+    <div class="skinTabs" id="skinTabs"></div>
+    <div id="skinsGrid"></div>
+    <button id="skinsCloseBtn" style="margin-top:8px;">BACK</button>
+  `;
+  wrap.appendChild(overlay);
+ 
+  const tabsEl = overlay.querySelector('#skinTabs');
+  const gridEl = overlay.querySelector('#skinsGrid');
+ 
+  function renderTabs(){
+    tabsEl.innerHTML = '';
+    categories.forEach(cat => {
+      const btn = document.createElement('div');
+      btn.className = 'skinTab' + (cat.key===activeCat ? ' active' : '');
+      btn.textContent = cat.label;
+      btn.onclick = () => { activeCat = cat.key; renderTabs(); renderGrid(); };
+      tabsEl.appendChild(btn);
+    });
+  }
+ 
+  function renderGrid(){
+    gridEl.innerHTML = '';
+    const stats = getStats();
+    const equipped = getEquippedSkins();
+    const cat = categories.find(c => c.key===activeCat);
+ 
+    cat.list.forEach(skin => {
+      const unlocked = isSkinUnlocked(skin, stats);
+      const isEquipped = equipped[activeCat] === skin.id;
+ 
+      const card = document.createElement('div');
+      card.className = 'skinCard' + (isEquipped ? ' equipped' : '') + (!unlocked ? ' locked' : '');
+ 
+      const previewCanvas = document.createElement('canvas');
+      previewCanvas.width = 64; previewCanvas.height = 64;
+      const pctx = previewCanvas.getContext('2d');
+ 
+      if(activeCat === 'ship'){
+        pctx.save();
+        pctx.translate(32,36);
+        pctx.scale(1.1,1.1);
+        skin.draw(pctx, true);
+        pctx.restore();
+      } else if(activeCat === 'bullet'){
+        pctx.fillStyle = skin.color;
+        pctx.fillRect(28,20,8,24);
+      } else if(activeCat === 'missile'){
+        pctx.save();
+        pctx.translate(32,32);
+        pctx.fillStyle = skin.color;
+        pctx.fillRect(-4,-16,8,32);
+        pctx.restore();
+      } else if(activeCat === 'flare'){
+        pctx.fillStyle = `rgba(${skin.color},1)`;
+        pctx.beginPath(); pctx.arc(32,32,14,0,Math.PI*2); pctx.fill();
+      }
+ 
+      const nameEl = document.createElement('div');
+      nameEl.className = 'skinName';
+      nameEl.textContent = skin.name;
+ 
+      card.appendChild(previewCanvas);
+      card.appendChild(nameEl);
+ 
+      if(isEquipped){
+        const tag = document.createElement('div');
+        tag.className = 'skinEquippedTag';
+        tag.textContent = 'EQUIPPED';
+        card.appendChild(tag);
+      } else if(!unlocked){
+        const req = document.createElement('div');
+        req.className = 'skinReq';
+        req.textContent = '🔒 ' + unlockRequirementText(skin);
+        card.appendChild(req);
+      }
+ 
+      card.onclick = () => {
+        if(!unlocked) return;
+        setEquippedSkin(activeCat, skin.id);
+        renderGrid();
+      };
+ 
+      gridEl.appendChild(card);
+    });
+  }
+ 
+  renderTabs();
+  renderGrid();
+ 
+  overlay.querySelector('#skinsCloseBtn').onclick = () => {
+    wrap.removeChild(overlay);
+  };
+}
 function openOnScreenKeyboard(initialValue, onDone){
   const wrap = document.getElementById('wrap');
   const overlay = document.createElement('div');
