@@ -1,3 +1,4 @@
+ndefined fighter · HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -596,6 +597,95 @@ const FLARE_SKINS = [
   { id:'royal', name:'Royal', unlock:{type:'kills', value:250}, color:'180,80,255' }
 ];
  
+// ---------- Enemy Skins ----------
+// Each enemy type has its own list of skins. Unlocks use the same stat system as ship skins.
+const ENEMY_SKINS = {
+  ufo: [
+    { id:'default', name:'Standard UFO', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#9f6cff'; ctx.strokeStyle='#c9f';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'toxic_ufo', name:'Toxic Saucer', unlock:{type:'score', value:4000}, draw(ctx,e){
+      ctx.fillStyle='#4dff4d'; ctx.strokeStyle='#aaffaa';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#1a1'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'crimson_ufo', name:'Crimson Saucer', unlock:{type:'wave', value:12}, draw(ctx,e){
+      ctx.fillStyle='#ff3355'; ctx.strokeStyle='#ffaacc';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  fighter: [
+    { id:'default', name:'Standard Fighter', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#ff5c5c'; ctx.strokeStyle='#faa';
+      ctx.beginPath();
+      ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'stealth_fighter', name:'Stealth Fighter', unlock:{type:'kills', value:150}, draw(ctx,e){
+      ctx.fillStyle='#333338'; ctx.strokeStyle='#777';
+      ctx.beginPath();
+      ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'gold_fighter', name:'Gold Squadron', unlock:{type:'score', value:10000}, draw(ctx,e){
+      ctx.fillStyle='#ffcc00'; ctx.strokeStyle='#fff2b0';
+      ctx.beginPath();
+      ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }}
+  ],
+  bomber: [
+    { id:'default', name:'Standard Bomber', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#c96b2e'; ctx.strokeStyle='#eb5';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
+    }},
+    { id:'arctic_bomber', name:'Arctic Bomber', unlock:{type:'wave', value:14}, draw(ctx,e){
+      ctx.fillStyle='#c9e8ff'; ctx.strokeStyle='#fff';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#7ab8e8'; ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
+    }}
+  ],
+  spaceship: [
+    { id:'default', name:'Standard Cruiser', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#4b4b6b'; ctx.strokeStyle='#88f';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#0ff'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'dread_cruiser', name:'Dreadnought', unlock:{type:'wave', value:24}, draw(ctx,e){
+      ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#ff3333';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ff3333'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  drone: [
+    { id:'default', name:'Standard Drone', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle= e.diving ? '#ff3333' : '#888';
+      ctx.strokeStyle='#faa';
+      ctx.beginPath();
+      ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'night_drone', name:'Night Drone', unlock:{type:'kills', value:600}, draw(ctx,e){
+      ctx.fillStyle= e.diving ? '#ff3333' : '#1a1a22';
+      ctx.strokeStyle='#555';
+      ctx.beginPath();
+      ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }}
+  ]
+};
+ 
+function getEquippedEnemySkin(type){
+  return localStorage.getItem('uf_enemyskin_' + type) || 'default';
+}
+function setEquippedEnemySkin(type, id){
+  localStorage.setItem('uf_enemyskin_' + type, id);
+}
+ 
 function getStats(){
   try{
     return JSON.parse(localStorage.getItem('uf_stats')) || { bestScore:0, bestWave:0, totalKills:0 };
@@ -814,6 +904,7 @@ function updateBullets(){
 function updateMissiles(){
   missiles = missiles.filter(m=>{
     m.life--;
+    if(m.spawnGrace > 0) m.spawnGrace--;
     if(m.life<=0) return false;
  
     // retarget to nearby flare if player missile targeting... actually flares decoy ENEMY missiles
@@ -906,7 +997,7 @@ function updateEnemies(){
       e.missileCd--;
       if(e.missileCd<=0){
         e.missileCd = rand(200,320);
-        missiles.push({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.2,turn:0.045,life:300,w:5,h:10});
+        missiles.push({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.2,turn:0.045,life:300,w:5,h:10,spawnGrace:15});
       }
     }
     else if(e.type==='bomber'){
@@ -993,6 +1084,21 @@ function updateCollisions(){
   }
   bullets = bullets.filter(b=>!b.dead);
  
+  // player bullets vs enemy missiles (bullets can shoot down incoming missiles)
+  for(const b of bullets){
+    for(const m of missiles){
+      if(m.side!=='enemy' || m.dead) continue;
+      if(circleHit(b,m,4,5)){
+        b.dead = true;
+        m.dead = true;
+        spawnParticles(m.x,m.y,'#fc4',14,4);
+        break;
+      }
+    }
+  }
+  bullets = bullets.filter(b=>!b.dead);
+  missiles = missiles.filter(m=>!m.dead);
+ 
   // player missiles vs enemies
   for(const m of missiles){
     if(m.side!=='player') continue;
@@ -1005,6 +1111,40 @@ function updateCollisions(){
         if(e.hp<=0){
           e.alive=false; addScore(e.scoreVal);
           spawnParticles(e.x,e.y,'#fa4',26,5);
+        }
+        break;
+      }
+    }
+  }
+  missiles = missiles.filter(m=>!m.dead);
+ 
+  // enemy missiles vs UFO/spaceship laser beam (friendly fire)
+  for(const m of missiles){
+    if(m.side!=='enemy') continue;
+    for(const e of enemies){
+      if(!e.alive || e.type!=='spaceship' || e.laserT<=0) continue;
+      if(Math.abs(m.x - e.x) < 5 && m.y > e.y){
+        m.dead = true;
+        spawnParticles(m.x,m.y,'#0ff',12,4);
+        break;
+      }
+    }
+  }
+  missiles = missiles.filter(m=>!m.dead);
+ 
+  // enemy missiles vs other enemies (friendly fire collisions)
+  for(const m of missiles){
+    if(m.side!=='enemy' || (m.spawnGrace && m.spawnGrace>0)) continue;
+    for(const e of enemies){
+      if(!e.alive) continue;
+      if(circleHit(m,e,6,e.w/2)){
+        e.hp -= 20;
+        m.dead = true;
+        spawnParticles(m.x,m.y,'#f83',16,4);
+        if(e.hp<=0){
+          e.alive=false;
+          spawnParticles(e.x,e.y,'#fa4',20,4);
+          // no score awarded — friendly fire, not a player kill
         }
         break;
       }
@@ -1062,33 +1202,15 @@ function drawPlayer(){
 function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x,e.y);
-  if(e.type==='ufo'){
-    ctx.fillStyle='#9f6cff'; ctx.strokeStyle='#c9f';
-    ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
-  } else if(e.type==='fighter'){
-    ctx.fillStyle='#ff5c5c'; ctx.strokeStyle='#faa';
-    ctx.beginPath();
-    ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-  } else if(e.type==='bomber'){
-    ctx.fillStyle='#c96b2e'; ctx.strokeStyle='#eb5';
-    ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
-  } else if(e.type==='spaceship'){
-    ctx.fillStyle='#4b4b6b'; ctx.strokeStyle='#88f';
-    ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#0ff'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
-    if(e.laserT>0){
-      ctx.fillStyle='rgba(0,255,255,0.5)';
-      ctx.fillRect(-3,e.h/2,6,H);
-    }
-  } else if(e.type==='drone'){
-    ctx.fillStyle= e.diving ? '#ff3333' : '#888';
-    ctx.strokeStyle='#faa';
-    ctx.beginPath();
-    ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
+  const skinList = ENEMY_SKINS[e.type];
+  if(skinList){
+    const equippedId = getEquippedEnemySkin(e.type);
+    const skin = skinList.find(s => s.id === equippedId) || skinList[0];
+    skin.draw(ctx, e);
+  }
+  if(e.type==='spaceship' && e.laserT>0){
+    ctx.fillStyle='rgba(0,255,255,0.5)';
+    ctx.fillRect(-3,e.h/2,6,H);
   }
   ctx.restore();
  
@@ -1238,7 +1360,7 @@ function gameOver(){
  
   const beforeStats = getStats();
   const afterStats = updateStats({ finalScore: score, finalWave: wave, killsThisRun });
-  const allSkins = [...SHIP_SKINS, ...BULLET_SKINS, ...MISSILE_SKINS, ...FLARE_SKINS];
+  const allSkins = [...SHIP_SKINS, ...BULLET_SKINS, ...MISSILE_SKINS, ...FLARE_SKINS, ...Object.values(ENEMY_SKINS).flat()];
   const newlyUnlocked = allSkins.filter(s => !isSkinUnlocked(s, beforeStats) && isSkinUnlocked(s, afterStats));
  
   const unlockHtml = newlyUnlocked.length
@@ -1618,7 +1740,12 @@ function openSkinsScreen(){
     { key:'ship', label:'SHIP', list:SHIP_SKINS },
     { key:'bullet', label:'BULLETS', list:BULLET_SKINS },
     { key:'missile', label:'MISSILES', list:MISSILE_SKINS },
-    { key:'flare', label:'FLARES', list:FLARE_SKINS }
+    { key:'flare', label:'FLARES', list:FLARE_SKINS },
+    { key:'enemy_ufo', label:'UFO', list:ENEMY_SKINS.ufo, enemyType:'ufo' },
+    { key:'enemy_fighter', label:'FIGHTER', list:ENEMY_SKINS.fighter, enemyType:'fighter' },
+    { key:'enemy_bomber', label:'BOMBER', list:ENEMY_SKINS.bomber, enemyType:'bomber' },
+    { key:'enemy_spaceship', label:'CRUISER', list:ENEMY_SKINS.spaceship, enemyType:'spaceship' },
+    { key:'enemy_drone', label:'DRONE', list:ENEMY_SKINS.drone, enemyType:'drone' }
   ];
   let activeCat = 'ship';
  
@@ -1649,10 +1776,13 @@ function openSkinsScreen(){
     const stats = getStats();
     const equipped = getEquippedSkins();
     const cat = categories.find(c => c.key===activeCat);
+    const isEnemyCat = !!cat.enemyType;
  
     cat.list.forEach(skin => {
       const unlocked = isSkinUnlocked(skin, stats);
-      const isEquipped = equipped[activeCat] === skin.id;
+      const isEquipped = isEnemyCat
+        ? getEquippedEnemySkin(cat.enemyType) === skin.id
+        : equipped[activeCat] === skin.id;
  
       const card = document.createElement('div');
       card.className = 'skinCard' + (isEquipped ? ' equipped' : '') + (!unlocked ? ' locked' : '');
@@ -1661,7 +1791,13 @@ function openSkinsScreen(){
       previewCanvas.width = 64; previewCanvas.height = 64;
       const pctx = previewCanvas.getContext('2d');
  
-      if(activeCat === 'ship'){
+      if(isEnemyCat){
+        pctx.save();
+        pctx.translate(32,32);
+        const fakeEnemy = { w:36, h:24, diving:false };
+        skin.draw(pctx, fakeEnemy);
+        pctx.restore();
+      } else if(activeCat === 'ship'){
         pctx.save();
         pctx.translate(32,36);
         pctx.scale(1.1,1.1);
@@ -1702,7 +1838,11 @@ function openSkinsScreen(){
  
       card.onclick = () => {
         if(!unlocked) return;
-        setEquippedSkin(activeCat, skin.id);
+        if(isEnemyCat){
+          setEquippedEnemySkin(cat.enemyType, skin.id);
+        } else {
+          setEquippedSkin(activeCat, skin.id);
+        }
         renderGrid();
       };
  
