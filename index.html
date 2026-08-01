@@ -76,7 +76,7 @@
 </style>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
@@ -101,6 +101,41 @@
       return true;
     } catch(e){
       console.error('score submit failed', e);
+      return false;
+    }
+  };
+ 
+  // Usernames are claimed as keys under /usernames/{lowercased_name} = true
+  // runTransaction ensures two people can't claim the same name at once.
+  function normalizeName(name){
+    return name.trim().slice(0,12).replace(/[.#$\[\]\/]/g,'_');
+  }
+ 
+  window.__claimUsername = async function(name){
+    const key = normalizeName(name).toLowerCase();
+    if(!key) return { ok:false, reason:'empty' };
+    const nameRef = ref(db, 'usernames/' + key);
+    try{
+      const result = await runTransaction(nameRef, (current) => {
+        if(current === null) return true; // claim it
+        return; // abort, already taken
+      });
+      if(result.committed) return { ok:true };
+      return { ok:false, reason:'taken' };
+    } catch(e){
+      console.error('claim username failed', e);
+      return { ok:false, reason:'error' };
+    }
+  };
+ 
+  window.__isUsernameTaken = async function(name){
+    const key = normalizeName(name).toLowerCase();
+    if(!key) return false;
+    try{
+      const snap = await get(ref(db, 'usernames/' + key));
+      return snap.exists();
+    } catch(e){
+      console.error('check username failed', e);
       return false;
     }
   };
@@ -516,22 +551,10 @@ function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
 function addScore(amount){
   const now = performance.now();
  
-  // condition 1: single gain over 600
+  // condition: single gain over 600 (max legit single kill is the 600-pt spaceship boss)
   if(amount > 600){
     cheatFlagged = true;
     cheatReason = 'DEVTOOLS/HACK USED (single gain > 600)';
-  }
- 
-  // condition 2: gains happening suspiciously fast, but ignore same-frame kills
-  // (multiple enemies dying in the same collision pass is normal gameplay)
-  if(scoreLog.length){
-    const last = scoreLog[scoreLog.length-1];
-    const gap = (now - last.ts) / 1000; // seconds
-    const sameFrame = last.frame === frame;
-    if(!sameFrame && gap >= 0.001 && gap <= 0.1){
-      cheatFlagged = true;
-      cheatReason = 'DEVTOOLS/HACK USED (score rate anomaly)';
-    }
   }
  
   scoreLog.push({ delta: amount, ts: now, frame });
@@ -839,8 +862,20 @@ function gameOver(){
   document.getElementById('submitScoreBtn').onclick = async () => {
     const nameEl = document.getElementById('nameInput');
     const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
-    setUsername(name);
     const btn = document.getElementById('submitScoreBtn');
+ 
+    // if this is a different name than the saved one, it needs to be claimed first
+    if(name.toLowerCase() !== (getUsername()||'').toLowerCase()){
+      btn.disabled = true; btn.textContent = 'CHECKING NAME...';
+      const claim = window.__claimUsername ? await window.__claimUsername(name) : { ok:true };
+      if(!claim.ok){
+        alert(`Callsign "${name}" is already taken. Pick another.`);
+        btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
+        return;
+      }
+    }
+    setUsername(name);
+ 
     btn.disabled = true; btn.textContent = 'SUBMITTING...';
     let ok;
     if(cheatFlagged){
@@ -876,8 +911,8 @@ function loop(){
   requestAnimationFrame(loop);
 }
  
-function resetGame(){
-  ensureUsername();
+async function resetGame(){
+  await ensureUsername();
   score=0; wave=1;
   scoreLog = []; cheatFlagged = false; cheatReason = '';
   player.hp=100; player.x=W/2; player.y=H-90;
@@ -902,14 +937,26 @@ function getUsername(){
 function setUsername(name){
   localStorage.setItem('uf_username', name);
 }
-function ensureUsername(){
+async function ensureUsername(){
   let name = getUsername();
-  if(!name){
-    name = prompt('Enter your callsign (max 12 chars):', 'PILOT') || 'PILOT';
-    name = name.trim().slice(0,12) || 'PILOT';
-    setUsername(name);
+  if(name) return name;
+ 
+  while(true){
+    let input = prompt('Choose your callsign (max 12 chars):', 'PILOT') || 'PILOT';
+    input = input.trim().slice(0,12) || 'PILOT';
+    if(!window.__claimUsername){
+      // firebase module not loaded yet, fall back without uniqueness check
+      setUsername(input);
+      return input;
+    }
+    const result = await window.__claimUsername(input);
+    if(result.ok){
+      setUsername(input);
+      return input;
+    } else {
+      alert(`Callsign "${input}" is already taken. Pick another.`);
+    }
   }
-  return name;
 }
 </script>
 </body>
