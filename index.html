@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -68,6 +69,27 @@
     font-family:inherit; background:#001820; color:#0ff; border:1px solid #0af;
     padding:8px; font-size:14px; text-align:center; width:200px;
   }
+  #oskOverlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,5,10,0.95); display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; z-index:50;
+  }
+  #oskPreview {
+    font-size:20px; color:#0ff; background:#001820; border:1px solid #0af;
+    padding:8px 16px; min-width:220px; text-align:center; letter-spacing:2px;
+  }
+  #oskGrid {
+    display:grid; grid-template-columns:repeat(10,1fr); gap:6px; max-width:460px;
+  }
+  .oskKey {
+    background:#0a2a35; color:#8cf; border:1px solid #145; padding:8px 0;
+    font-family:inherit; font-size:14px; cursor:pointer; text-align:center;
+  }
+  .oskKey.oskFocused {
+    outline:3px solid #0ff; outline-offset:1px; box-shadow:0 0 12px rgba(0,255,255,0.8);
+    background:#0af; color:#001;
+  }
+  .oskKey.oskWide { grid-column:span 3; }
   #wavecall {
     position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
     font-size:22px; color:#f55; text-shadow:0 0 10px #f00; pointer-events:none;
@@ -984,8 +1006,14 @@ function gameOver(){
   document.getElementById('changeNameLink').onclick = (e) => {
     e.preventDefault();
     const nameEl = document.getElementById('nameInput');
-    nameEl.value = '';
-    nameEl.focus();
+    if(gamepadIndex !== null){
+      openOnScreenKeyboard(nameEl.value, (result) => {
+        nameEl.value = result;
+      });
+    } else {
+      nameEl.value = '';
+      nameEl.focus();
+    }
   };
   document.getElementById('submitScoreBtn').onclick = async () => {
     const nameEl = document.getElementById('nameInput');
@@ -1203,6 +1231,30 @@ async function ensureUsername(){
   let name = getUsername();
   if(name) return name;
  
+  if(gamepadIndex !== null){
+    return new Promise((resolve) => {
+      const tryClaim = () => {
+        openOnScreenKeyboard('PILOT', async (input) => {
+          input = (input || 'PILOT').trim().slice(0,12) || 'PILOT';
+          if(!window.__claimUsername){
+            setUsername(input);
+            resolve(input);
+            return;
+          }
+          const result = await window.__claimUsername(input);
+          if(result.ok){
+            setUsername(input);
+            resolve(input);
+          } else {
+            alert(`Callsign "${input}" is already taken. Pick another.`);
+            tryClaim();
+          }
+        });
+      };
+      tryClaim();
+    });
+  }
+ 
   while(true){
     let input = prompt('Choose your callsign (max 12 chars):', 'PILOT') || 'PILOT';
     input = input.trim().slice(0,12) || 'PILOT';
@@ -1221,6 +1273,180 @@ async function ensureUsername(){
   }
 }
  
+// ---------- Controller UI Navigation ----------
+let navPrev = { up:false, down:false, left:false, right:false, x:false };
+let navFocusIndex = 0;
+ 
+function getNavTargets(){
+  // any visible, enabled button/link inside #center that isn't display:none
+  const container = document.getElementById('center');
+  if(!container || container.classList.contains('hidden')) return [];
+  const all = Array.from(container.querySelectorAll('button, a[href="#"]'));
+  return all.filter(el => {
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && !el.disabled;
+  });
+}
+ 
+function applyNavFocusStyle(){
+  const targets = getNavTargets();
+  targets.forEach((el,i) => {
+    if(i === navFocusIndex){
+      el.style.outline = '3px solid #0ff';
+      el.style.outlineOffset = '2px';
+      el.style.boxShadow = '0 0 16px rgba(0,255,255,0.8)';
+    } else {
+      el.style.outline = '';
+      el.style.boxShadow = '';
+    }
+  });
+}
+ 
+function navGamepadTick(){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = gamepadIndex !== null ? pads[gamepadIndex] : null;
+  requestAnimationFrame(navGamepadTick);
+  if(!gp) return;
+ 
+  const center = document.getElementById('center');
+  const uiOpen = center && !center.classList.contains('hidden');
+  if(!uiOpen) return;
+ 
+  const targets = getNavTargets();
+  if(!targets.length) return;
+  if(navFocusIndex >= targets.length) navFocusIndex = 0;
+ 
+  const upPressed = (gp.buttons[12] && gp.buttons[12].pressed) || gp.axes[1] < -0.5;
+  const downPressed = (gp.buttons[13] && gp.buttons[13].pressed) || gp.axes[1] > 0.5;
+  const xPressed = gp.buttons[0] && gp.buttons[0].pressed;
+ 
+  if(upPressed && !navPrev.up){
+    navFocusIndex = (navFocusIndex - 1 + targets.length) % targets.length;
+    applyNavFocusStyle();
+  }
+  if(downPressed && !navPrev.down){
+    navFocusIndex = (navFocusIndex + 1) % targets.length;
+    applyNavFocusStyle();
+  }
+  if(xPressed && !navPrev.x){
+    targets[navFocusIndex].click();
+  }
+ 
+  navPrev.up = upPressed;
+  navPrev.down = downPressed;
+  navPrev.x = xPressed;
+}
+navGamepadTick();
+ 
+// ---------- On-screen keyboard (for controller callsign entry) ----------
+function openOnScreenKeyboard(initialValue, onDone){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'oskOverlay';
+ 
+  const keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('');
+  let value = (initialValue || '').slice(0,12);
+ 
+  overlay.innerHTML = `
+    <div id="oskPreview">${value || '&nbsp;'}</div>
+    <div id="oskGrid"></div>
+  `;
+  wrap.appendChild(overlay);
+ 
+  const grid = overlay.querySelector('#oskGrid');
+  const preview = overlay.querySelector('#oskPreview');
+ 
+  const keyEls = [];
+  keys.forEach(k => {
+    const btn = document.createElement('div');
+    btn.className = 'oskKey';
+    btn.textContent = k;
+    btn.onclick = () => {
+      if(value.length < 12){ value += k; updatePreview(); }
+    };
+    grid.appendChild(btn);
+    keyEls.push(btn);
+  });
+ 
+  const backBtn = document.createElement('div');
+  backBtn.className = 'oskKey oskWide';
+  backBtn.textContent = '⌫ BACK';
+  backBtn.onclick = () => { value = value.slice(0,-1); updatePreview(); };
+  grid.appendChild(backBtn);
+  keyEls.push(backBtn);
+ 
+  const clearBtn = document.createElement('div');
+  clearBtn.className = 'oskKey oskWide';
+  clearBtn.textContent = 'CLEAR';
+  clearBtn.onclick = () => { value = ''; updatePreview(); };
+  grid.appendChild(clearBtn);
+  keyEls.push(clearBtn);
+ 
+  const doneBtn = document.createElement('div');
+  doneBtn.className = 'oskKey oskWide';
+  doneBtn.textContent = 'DONE ✓';
+  doneBtn.style.color = '#0f8';
+  doneBtn.onclick = () => {
+    wrap.removeChild(overlay);
+    oskActive = false;
+    onDone(value);
+  };
+  grid.appendChild(doneBtn);
+  keyEls.push(doneBtn);
+ 
+  function updatePreview(){
+    preview.innerHTML = value ? value : '&nbsp;';
+  }
+ 
+  let focusIdx = 0;
+  const cols = 10;
+  function applyOskFocus(){
+    keyEls.forEach((el,i) => el.classList.toggle('oskFocused', i===focusIdx));
+  }
+  applyOskFocus();
+ 
+  oskActive = true;
+  oskState = {
+    move(dir){
+      if(dir==='left') focusIdx = Math.max(0, focusIdx-1);
+      if(dir==='right') focusIdx = Math.min(keyEls.length-1, focusIdx+1);
+      if(dir==='up') focusIdx = Math.max(0, focusIdx-cols);
+      if(dir==='down') focusIdx = Math.min(keyEls.length-1, focusIdx+cols);
+      applyOskFocus();
+    },
+    confirm(){
+      keyEls[focusIdx].click();
+    }
+  };
+}
+ 
+let oskActive = false;
+let oskState = null;
+let oskPrev = { up:false, down:false, left:false, right:false, x:false };
+ 
+function oskGamepadTick(){
+  requestAnimationFrame(oskGamepadTick);
+  if(!oskActive || !oskState) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = gamepadIndex !== null ? pads[gamepadIndex] : null;
+  if(!gp) return;
+ 
+  const up = (gp.buttons[12] && gp.buttons[12].pressed) || gp.axes[1] < -0.5;
+  const down = (gp.buttons[13] && gp.buttons[13].pressed) || gp.axes[1] > 0.5;
+  const left = (gp.buttons[14] && gp.buttons[14].pressed) || gp.axes[0] < -0.5;
+  const right = (gp.buttons[15] && gp.buttons[15].pressed) || gp.axes[0] > 0.5;
+  const x = gp.buttons[0] && gp.buttons[0].pressed;
+ 
+  if(up && !oskPrev.up) oskState.move('up');
+  if(down && !oskPrev.down) oskState.move('down');
+  if(left && !oskPrev.left) oskState.move('left');
+  if(right && !oskPrev.right) oskState.move('right');
+  if(x && !oskPrev.x) oskState.confirm();
+ 
+  oskPrev = { up, down, left, right, x };
+}
+oskGamepadTick();
+ 
 // Keep scanning for a gamepad even on the menu screen / when not running,
 // so the connection indicator updates and the pad is ready before LAUNCH.
 function idleGamepadPoll(){
@@ -1228,6 +1454,19 @@ function idleGamepadPoll(){
   requestAnimationFrame(idleGamepadPoll);
 }
 idleGamepadPoll();
+ 
+// re-apply focus highlight whenever the center screen's content changes
+const centerObserver = new MutationObserver(() => {
+  navFocusIndex = 0;
+  applyNavFocusStyle();
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const center = document.getElementById('center');
+  if(center) centerObserver.observe(center, { childList:true, subtree:true });
+});
+if(document.getElementById('center')){
+  centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
+}
  
 </script>
 </body>
