@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNDEFINED FIGHTER</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+body {
+  background-color: #000;
+  color: #00ffff;
+  font-family: 'Share Tech Mono', monospace;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+#canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+#hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 18px;
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px #00ffff;
+}
+
+.hull-container {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.hull-bar-bg {
+  width: 200px;
+  height: 12px;
+  background-color: #051d1d;
+  border: 1px solid #00ffff;
+}
+
+.hull-bar-fill {
+  width: 100%;
+  height: 100%;
+  background-color: #00ffaa;
+  box-shadow: 0 0 10px #00ffaa;
+}
+
+#menu {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+  max-width: 650px;
+  width: 90%;
+}
+
+.title {
+  font-size: 42px;
+  font-weight: bold;
+  letter-spacing: 6px;
+  color: #00ffff;
+  text-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff;
+}
+
+.info-text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #88ffff;
+}
+
+.controller-status {
+  font-size: 14px;
+  color: #ffff00;
+  text-shadow: 0 0 5px #ffff00;
+  margin-bottom: 5px;
+}
+
+.btn {
+  background: #000;
+  border: 2px solid #00ffff;
+  color: #00ffff;
+  padding: 12px 40px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 18px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  box-shadow: 0 0 10px #00ffff;
+}
+
+.btn:hover {
+  background: #00ffff;
+  color: #000;
+}
+
+.hidden {
+  display: none !important;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="hud">
+  <div class="hud-row">
+    <div class="hull-container">
+      <div>HULL</div>
+      <div class="hull-bar-bg">
+        <div id="hull-fill" class="hull-bar-fill"></div>
+      </div>
+      <div style="margin-top: 8px;">FLARES: <span id="flare-count">3</span></div>
+    </div>
+    <div style="text-align: right;">
+      <div>SCORE: <span id="score-val">0</span></div>
+      <div style="margin-top: 8px;">WAVE: <span id="wave-val">1</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="menu">
+  <div class="title">UNDEFINED FIGHTER</div>
+  <div class="info-text">
+    F-8 vs everything. WASD/Arrows move. E guns. Hold Q near an enemy to lock on, release to fire homing missile. F pops a flare to decoy incoming missiles.
+  </div>
+  <div class="info-text">
+    Controller (PS3 layout): D-pad/L-Stick move, X shoot, O missile, &Delta; flare.
+  </div>
+  <div id="controller-status" class="controller-status">
+    [CONTROLLER: Press any button on pad to connect]
+  </div>
+  <div class="info-text">
+    Survive the waves. UFOs, enemy fighters, bombers, a spaceship, and Shahed drones incoming.
+  </div>
+  <button class="btn" id="launch-btn">LAUNCH</button>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const hullFill = document.getElementById('hull-fill');
+const flareCountEl = document.getElementById('flare-count');
+const scoreValEl = document.getElementById('score-val');
+const waveValEl = document.getElementById('wave-val');
+const menuEl = document.getElementById('menu');
+const launchBtn = document.getElementById('launch-btn');
+const controllerStatusEl = document.getElementById('controller-status');
+
+let gameState = 'MENU';
+let score = 0;
+let wave = 1;
+let activeGamepadIndex = null;
+
+window.addEventListener("gamepadconnected", (e) => {
+  activeGamepadIndex = e.gamepad.index;
+  controllerStatusEl.textContent = `[CONTROLLER CONNECTED: ${e.gamepad.id}]`;
+});
+
+window.addEventListener("gamepaddisconnected", (e) => {
+  if (activeGamepadIndex === e.gamepad.index) {
+    activeGamepadIndex = null;
+    controllerStatusEl.textContent = "[CONTROLLER DISCONNECTED]";
+  }
+});
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyQ' && gameState === 'PLAYING') player.startLockOn();
+  if (e.code === 'KeyF' && gameState === 'PLAYING') player.popFlare();
+});
+window.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'KeyQ' && gameState === 'PLAYING') player.releaseMissile();
+});
+
+launchBtn.addEventListener('click', () => {
+  menuEl.classList.add('hidden');
+  resetGame();
+  gameState = 'PLAYING';
+});
+
+class Player {
+  constructor() {
+    this.x = canvas.width / 2;
+    this.y = canvas.height - 100;
+    this.speed = 6;
+    this.hull = 100;
+    this.flares = 3;
+    this.gunCooldown = 0;
+    this.lockTarget = null;
+    this.lockTime = 0;
+    this.isLocking = false;
+    this.prevGpButtons = {};
+  }
+
+  reset() {
+    this.x = canvas.width / 2;
+    this.y = canvas.height - 100;
+    this.hull = 100;
+    this.flares = 3;
+    this.lockTarget = null;
+    this.lockTime = 0;
+    this.isLocking = false;
+    this.prevGpButtons = {};
+  }
+
+  startLockOn() {
+    this.isLocking = true;
+    this.lockTime = 0;
+  }
+
+  releaseMissile() {
+    if (this.isLocking && this.lockTarget && this.lockTime >= 25) {
+      projectiles.push(new Missile(this.x, this.y, -Math.PI / 2, this.lockTarget, true));
+    }
+    this.isLocking = false;
+    this.lockTarget = null;
+    this.lockTime = 0;
+  }
+
+  popFlare() {
+    if (this.flares > 0) {
+      this.flares--;
+      for (let i = 0; i < 6; i++) {
+        flares.push(new Flare(this.x, this.y));
+      }
+    }
+  }
+
+  handleGamepad() {
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+
+    if (activeGamepadIndex !== null && gamepads[activeGamepadIndex]) {
+      gp = gamepads[activeGamepadIndex];
+    } else {
+      for (let i = 0; i < gamepads.length; i++) {
+        if (gamepads[i]) {
+          gp = gamepads[i];
+          activeGamepadIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (!gp) return { dx: 0, dy: 0 };
+
+    let dx = 0;
+    let dy = 0;
+
+    // Left Stick
+    if (Math.abs(gp.axes[0]) > 0.15) dx = gp.axes[0];
+    if (Math.abs(gp.axes[1]) > 0.15) dy = gp.axes[1];
+
+    // D-Pad Standard mapping: 12 (Up), 13 (Down), 14 (Left), 15 (Right)
+    if (gp.buttons[14]?.pressed) dx = -1;
+    if (gp.buttons[15]?.pressed) dx = 1;
+    if (gp.buttons[12]?.pressed) dy = -1;
+    if (gp.buttons[13]?.pressed) dy = 1;
+
+    // PS3 Standard Mapping:
+    // Button 0 = Cross (X) -> Shoot
+    // Button 1 = Circle (O) -> Missile
+    // Button 3 = Triangle (Δ) -> Flare
+    
+    // Shoot (X)
+    const btnShoot = gp.buttons[0]?.pressed || gp.buttons[0]?.value > 0.5;
+    if (btnShoot && this.gunCooldown <= 0) {
+      this.shootGun();
+    }
+
+    // Missile (O) - Hold to lock, release to fire
+    const btnMissile = gp.buttons[1]?.pressed || gp.buttons[1]?.value > 0.5;
+    if (btnMissile && !this.prevGpButtons[1]) {
+      this.startLockOn();
+    } else if (!btnMissile && this.prevGpButtons[1]) {
+      this.releaseMissile();
+    }
+    this.prevGpButtons[1] = btnMissile;
+
+    // Flare (Triangle)
+    const btnFlare = gp.buttons[3]?.pressed || gp.buttons[3]?.value > 0.5;
+    if (btnFlare && !this.prevGpButtons[3]) {
+      this.popFlare();
+    }
+    this.prevGpButtons[3] = btnFlare;
+
+    return { dx, dy };
+  }
+
+  update() {
+    let dx = 0;
+    let dy = 0;
+
+    if (keys['KeyW'] || keys['ArrowUp']) dy -= 1;
+    if (keys['KeyS'] || keys['ArrowDown']) dy += 1;
+    if (keys['KeyA'] || keys['ArrowLeft']) dx -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) dx += 1;
+
+    const gpInput = this.handleGamepad();
+    if (dx === 0 && dy === 0) {
+      dx = gpInput.dx;
+      dy = gpInput.dy;
+    }
+
+    this.x += dx * this.speed;
+    this.y += dy * this.speed;
+
+    this.x = Math.max(20, Math.min(canvas.width - 20, this.x));
+    this.y = Math.max(20, Math.min(canvas.height - 20, this.y));
+
+    if (keys['KeyE'] && this.gunCooldown <= 0) {
+      this.shootGun();
+    }
+    if (this.gunCooldown > 0) this.gunCooldown--;
+
+    if (this.isLocking) {
+      let closest = null;
+      let minDist = 400;
+      enemies.forEach(e => {
+        const d = Math.hypot(e.x - this.x, e.y - this.y);
+        if (d < minDist) {
+          minDist = d;
+          closest = e;
+        }
+      });
+      this.lockTarget = closest;
+      if (this.lockTarget) {
+        this.lockTime = Math.min(25, this.lockTime + 1);
+      } else {
+        this.lockTime = 0;
+      }
+    }
+  }
+
+  shootGun() {
+    this.gunCooldown = 6;
+    projectiles.push(new Bullet(this.x, this.y, -Math.PI / 2, true));
+  }
+
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#00ffff';
+
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(-12, 12);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(12, 12);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.restore();
+
+    if (this.isLocking && this.lockTarget) {
+      ctx.save();
+      ctx.translate(this.lockTarget.x, this.lockTarget.y);
+      ctx.strokeStyle = this.lockTime >= 25 ? '#ff0000' : '#ffff00';
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = ctx.strokeStyle;
+      const size = 30 - (this.lockTime / 25) * 10;
+      ctx.strokeRect(-size / 2, -size / 2, size, size);
+      ctx.restore();
+    }
+  }
+}
+
+class Bullet {
+  constructor(x, y, angle, isPlayer) {
+    this.x = x;
+    this.y = y;
+    this.vx = Math.cos(angle) * 12;
+    this.vy = Math.sin(angle) * 12;
+    this.isPlayer = isPlayer;
+    this.life = 60;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+  }
+
+  draw() {
+    ctx.save();
+    ctx.strokeStyle = this.isPlayer ? '#00ffff' : '#ff3333';
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(this.x - this.vx * 0.5, this.y - this.vy * 0.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+class Missile {
+  constructor(x, y, angle, target, isPlayer) {
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.speed = 8;
+    this.target = target;
+    this.isPlayer = isPlayer;
+    this.life = 180;
+  }
+
+  update() {
+    if (this.isPlayer) {
+      if (this.target && enemies.includes(this.target)) {
+        const targetAngle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+        let diff = targetAngle - this.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.angle += Math.sign(diff) * Math.min(Math.abs(diff), 0.1);
+      }
+    } else {
+      let targetObj = player;
+      let closestFlare = null;
+      let minFDist = 200;
+      flares.forEach(f => {
+        const d = Math.hypot(f.x - this.x, f.y - this.y);
+        if (d < minFDist) {
+          minFDist = d;
+          closestFlare = f;
+        }
+      });
+      if (closestFlare) targetObj = closestFlare;
+
+      const targetAngle = Math.atan2(targetObj.y - this.y, targetObj.x - this.x);
+      let diff = targetAngle - this.angle;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      this.angle += Math.sign(diff) * Math.min(Math.abs(diff), 0.05);
+    }
+
+    this.x += Math.cos(this.angle) * this.speed;
+    this.y += Math.sin(this.angle) * this.speed;
+    this.life--;
+
+    particles.push(new Particle(this.x, this.y, '#ffaa00', 3, 10));
+  }
+
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    ctx.fillStyle = this.isPlayer ? '#00ffff' : '#ff0055';
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.restore();
+  }
+}
+
+class Flare {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.vx = (Math.random() - 0.5) * 4;
+    this.vy = (Math.random() - 0.5) * 4;
+    this.life = 90;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+    particles.push(new Particle(this.x, this.y, '#ffffff', 4, 8));
+  }
+
+  draw() {
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#ffffaa';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+class Particle {
+  constructor(x, y, color, size, life) {
+    this.x = x;
+    this.y = y;
+    this.color = color;
+    this.size = size;
+    this.maxLife = life;
+    this.life = life;
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = (Math.random() - 0.5) * 2;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
+  }
+
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.life / this.maxLife;
+    ctx.fillStyle = this.color;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+class Enemy {
+  constructor(type) {
+    this.type = type;
+    this.x = Math.random() * (canvas.width - 100) + 50;
+    this.y = -40;
+    this.shootTimer = Math.floor(Math.random() * 30);
+
+    if (type === 'ufo') {
+      this.hp = 20;
+      this.speed = 2;
+      this.scoreVal = 100;
+      this.color = '#00ff66';
+    } else if (type === 'fighter') {
+      this.hp = 30;
+      this.speed = 2.5;
+      this.scoreVal = 150;
+      this.color = '#ff0055';
+    } else if (type === 'shahed') {
+      this.hp = 10;
+      this.speed = 4;
+      this.scoreVal = 80;
+      this.color = '#ffaa00';
+    } else if (type === 'bomber') {
+      this.hp = 80;
+      this.speed = 1;
+      this.scoreVal = 300;
+      this.color = '#ff5500';
+    } else if (type === 'spaceship') {
+      this.hp = 250;
+      this.speed = 0.5;
+      this.scoreVal = 800;
+      this.color = '#aa00ff';
+    }
+  }
+
+  update() {
+    this.y += this.speed;
+
+    if (this.y > canvas.height + 50) {
+      this.y = -40;
+      this.x = Math.random() * (canvas.width - 100) + 50;
+    }
+
+    this.shootTimer++;
+    if (this.type === 'fighter' && this.shootTimer > 90) {
+      this.shootTimer = 0;
+      projectiles.push(new Bullet(this.x, this.y, Math.PI / 2, false));
+    } else if (this.type === 'bomber' && this.shootTimer > 120) {
+      this.shootTimer = 0;
+      projectiles.push(new Missile(this.x, this.y, Math.PI / 2, player, false));
+    } else if (this.type === 'ufo' && this.shootTimer > 70) {
+      this.shootTimer = 0;
+      projectiles.push(new Bullet(this.x, this.y, Math.PI / 2, false));
+    } else if (this.type === 'spaceship' && this.shootTimer > 40) {
+      this.shootTimer = 0;
+      projectiles.push(new Bullet(this.x, this.y, Math.PI / 2, false));
+    }
+
+    if (this.type === 'shahed') {
+      const dx = player.x - this.x;
+      this.x += Math.sign(dx) * 1.5;
+      if (Math.hypot(player.x - this.x, player.y - this.y) < 25) {
+        player.hull -= 25;
+        this.hp = 0;
+        createExplosion(this.x, this.y, '#ffaa00');
+      }
+    }
+  }
+
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.strokeStyle = this.color;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = this.color;
+    ctx.lineWidth = 2;
+
+    if (this.type === 'ufo') {
+      ctx.beginPath();
+      ctx.arc(0, 0, 14, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (this.type === 'fighter') {
+      ctx.beginPath();
+      ctx.moveTo(0, 15);
+      ctx.lineTo(-12, -10);
+      ctx.lineTo(12, -10);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (this.type === 'shahed') {
+      ctx.beginPath();
+      ctx.moveTo(0, 10);
+      ctx.lineTo(-8, -12);
+      ctx.lineTo(8, -12);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (this.type === 'bomber') {
+      ctx.beginPath();
+      ctx.moveTo(0, 20);
+      ctx.lineTo(-20, -15);
+      ctx.lineTo(20, -15);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (this.type === 'spaceship') {
+      ctx.beginPath();
+      ctx.arc(0, 0, 25, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+}
+
+function createExplosion(x, y, color) {
+  for (let i = 0; i < 20; i++) {
+    particles.push(new Particle(x, y, color, Math.random() * 4 + 1, Math.random() * 20 + 10));
+  }
+}
+
+const player = new Player();
+let enemies = [];
+let projectiles = [];
+let flares = [];
+let particles = [];
+
+function spawnWave() {
+  enemies = [];
+  const count = 3 + wave * 2;
+  const types = ['ufo', 'fighter', 'shahed'];
+  if (wave >= 2) types.push('bomber');
+  if (wave >= 3) types.push('spaceship');
+
+  for (let i = 0; i < count; i++) {
+    const t = types[Math.floor(Math.random() * types.length)];
+    enemies.push(new Enemy(t));
+  }
+}
+
+function resetGame() {
+  score = 0;
+  wave = 1;
+  player.reset();
+  projectiles = [];
+  flares = [];
+  particles = [];
+  spawnWave();
+}
+
+function gameLoop() {
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (gameState === 'PLAYING') {
+    player.update();
+    player.draw();
+
+    if (enemies.length === 0) {
+      wave++;
+      if (player.flares < 5) player.flares++;
+      spawnWave();
+    }
+
+    enemies.forEach((e, ei) => {
+      e.update();
+      e.draw();
+
+      const d = Math.hypot(player.x - e.x, player.y - e.y);
+      if (d < 25) {
+        player.hull -= 10;
+        e.hp -= 20;
+      }
+
+      if (e.hp <= 0) {
+        createExplosion(e.x, e.y, e.color);
+        score += e.scoreVal;
+        enemies.splice(ei, 1);
+      }
+    });
+
+    projectiles.forEach((p, pi) => {
+      p.update();
+      p.draw();
+
+      if (p.isPlayer) {
+        enemies.forEach(e => {
+          if (Math.hypot(p.x - e.x, p.y - e.y) < 20) {
+            e.hp -= p instanceof Missile ? 50 : 10;
+            p.life = 0;
+            createExplosion(p.x, p.y, '#00ffff');
+          }
+        });
+      } else {
+        if (Math.hypot(p.x - player.x, p.y - player.y) < 15) {
+          player.hull -= p instanceof Missile ? 25 : 8;
+          p.life = 0;
+          createExplosion(p.x, p.y, '#ff0055');
+        }
+      }
+
+      if (p.life <= 0 || p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+        projectiles.splice(pi, 1);
+      }
+    });
+
+    flares.forEach((f, fi) => {
+      f.update();
+      f.draw();
+      if (f.life <= 0) flares.splice(fi, 1);
+    });
+
+    particles.forEach((pt, pti) => {
+      pt.update();
+      pt.draw();
+      if (pt.life <= 0) particles.splice(pti, 1);
+    });
+
+    if (player.hull <= 0) {
+      gameState = 'MENU';
+      menuEl.classList.remove('hidden');
+    }
+
+    hullFill.style.width = `${Math.max(0, player.hull)}%`;
+    flareCountEl.textContent = player.flares;
+    scoreValEl.textContent = score;
+    waveValEl.textContent = wave;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
