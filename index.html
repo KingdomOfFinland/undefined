@@ -114,6 +114,12 @@
   .skinCard .skinName { font-size:11px; color:#cdeaff; }
   .skinCard .skinReq { font-size:9px; color:#f88; margin-top:2px; }
   .skinCard .skinEquippedTag { font-size:9px; color:#0f8; margin-top:2px; }
+  #muteBtn {
+    position:absolute; top:6px; right:6px; z-index:5;
+    background:rgba(0,20,25,0.6); border:1px solid #145; color:#8cf;
+    font-size:15px; padding:4px 8px; cursor:pointer; pointer-events:auto;
+  }
+  #muteBtn:hover { background:#0a2a35; }
   #wavecall {
     position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
     font-size:22px; color:#f55; text-shadow:0 0 10px #f00; pointer-events:none;
@@ -297,6 +303,7 @@
       <span>WAVE: <span id="wave">1</span></span>
     </div>
   </div>
+  <button id="muteBtn" title="Toggle sound">🔊</button>
   <div id="lockind">LOCK ACQUIRED - HOLD Q</div>
   <div id="wavecall"></div>
   <div id="devIndicator" style="position:absolute;bottom:6px;left:6px;font-size:11px;color:#0f8;text-shadow:0 0 6px #0f8;display:none;pointer-events:none;">⚙ DEV MODE</div>
@@ -324,6 +331,98 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
+ 
+// ---------- Sound Engine (procedural, Web Audio — no audio files needed) ----------
+const SFX = (() => {
+  let actx = null;
+  let muted = false;
+ 
+  function ac(){
+    if(!actx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return null;
+      actx = new AC();
+    }
+    if(actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  // Browsers block audio until a user gesture — this quietly wakes the context on the first one.
+  function unlock(){ ac(); }
+  window.addEventListener('keydown', unlock, { once:true });
+  window.addEventListener('pointerdown', unlock, { once:true });
+ 
+  function tone(type, freq, dur, {vol=0.15, freqEnd=null, attack=0.005} = {}){
+    if(muted) return;
+    const a = ac(); if(!a) return;
+    const t0 = a.currentTime;
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if(freqEnd !== null) o.frequency.exponentialRampToValueAtTime(Math.max(freqEnd,1), t0+dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(vol, t0+attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(t0); o.stop(t0+dur+0.03);
+  }
+ 
+  function noiseBurst(dur, {vol=0.2, filterFreq=1200, filterType='lowpass', filterEnd=null} = {}){
+    if(muted) return;
+    const a = ac(); if(!a) return;
+    const t0 = a.currentTime;
+    const len = Math.max(1, Math.floor(a.sampleRate * dur));
+    const buffer = a.createBuffer(1, len, a.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<len;i++) data[i] = Math.random()*2-1;
+    const src = a.createBufferSource();
+    src.buffer = buffer;
+    const filt = a.createBiquadFilter();
+    filt.type = filterType;
+    filt.frequency.setValueAtTime(filterFreq, t0);
+    if(filterEnd !== null) filt.frequency.exponentialRampToValueAtTime(Math.max(filterEnd,10), t0+dur);
+    const g = a.createGain();
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    src.connect(filt); filt.connect(g); g.connect(a.destination);
+    src.start(t0); src.stop(t0+dur+0.03);
+  }
+ 
+  return {
+    setMuted(v){ muted = v; },
+    isMuted(){ return muted; },
+    shoot(){ tone('square', 880, 0.07, {vol:0.07, freqEnd:420}); },
+    enemyShoot(){ tone('square', 300, 0.08, {vol:0.045, freqEnd:150}); },
+    bombDrop(){ tone('sine', 160, 0.14, {vol:0.05, freqEnd:70}); },
+    missileLaunch(){ tone('sawtooth', 190, 0.35, {vol:0.11, freqEnd:55}); noiseBurst(0.3, {vol:0.05, filterFreq:2200, filterEnd:300}); },
+    laser(){ tone('sawtooth', 900, 0.45, {vol:0.045, freqEnd:600}); },
+    lockBeep(){ tone('square', 1200, 0.05, {vol:0.055}); },
+    lockReady(){ tone('square', 1500, 0.1, {vol:0.09, freqEnd:1900}); },
+    flare(){ noiseBurst(0.18, {vol:0.12, filterFreq:3200, filterEnd:800}); tone('triangle', 700, 0.12, {vol:0.05, freqEnd:300}); },
+    hit(){ tone('square', 220, 0.06, {vol:0.05, freqEnd:100}); },
+    explosionSmall(){ noiseBurst(0.16, {vol:0.13, filterFreq:1800, filterEnd:150}); tone('sawtooth', 140, 0.14, {vol:0.07, freqEnd:40}); },
+    explosion(size=1){
+      noiseBurst(0.32*size, {vol:0.2, filterFreq:2200, filterEnd:80});
+      tone('sawtooth', 110, 0.38*size, {vol:0.13, freqEnd:28});
+    },
+    playerHit(){ noiseBurst(0.14, {vol:0.13, filterFreq:1200, filterEnd:200}); tone('square', 150, 0.14, {vol:0.08, freqEnd:60}); },
+    playerDeath(){
+      noiseBurst(0.7, {vol:0.24, filterFreq:2200, filterEnd:60});
+      tone('sawtooth', 220, 0.8, {vol:0.15, freqEnd:28});
+      setTimeout(()=>tone('sawtooth', 160, 0.5, {vol:0.1, freqEnd:20}), 120);
+    },
+    waveStart(){
+      tone('square', 440, 0.12, {vol:0.07});
+      setTimeout(()=>tone('square', 660, 0.16, {vol:0.08}), 130);
+    },
+    gameOver(){
+      tone('sawtooth', 300, 0.25, {vol:0.09, freqEnd:150});
+      setTimeout(()=>tone('sawtooth', 200, 0.35, {vol:0.09, freqEnd:80}), 220);
+      setTimeout(()=>tone('sawtooth', 120, 0.5, {vol:0.11, freqEnd:40}), 460);
+    },
+    uiClick(){ tone('square', 520, 0.045, {vol:0.045}); }
+  };
+})();
  
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
@@ -397,6 +496,7 @@ let running = false;
 let score = 0, wave = 1;
 let frame = 0;
 let shakeT = 0;
+let dyingTimer = 0;
 let scoreLog = []; // {delta, ts} for anti-cheat detection
 let cheatFlagged = false;
 let cheatReason = '';
@@ -404,7 +504,7 @@ let killsThisRun = 0;
 let devMode = false;
 let betaUnlocked = false;
 let godMode = false;
-const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
+const DEV_PASSWORD = "hgyutiopt"; // <-- set your own password here
  
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
@@ -752,13 +852,30 @@ let flares = [];
 let particles = [];
 let bombs = [];
  
-function spawnParticles(x,y,color,n=12,speed=3){
+function spawnParticles(x,y,color,n=12,speed=3,size=3){
   for(let i=0;i<n;i++){
     particles.push({
       x,y, vx: rand(-speed,speed), vy: rand(-speed,speed),
-      life: rand(20,40), maxLife: 40, color
+      life: rand(20,40), maxLife: 40, color,
+      size: Math.max(1.5, size + rand(-1,1.5))
     });
   }
+}
+ 
+// Colorful, type-specific death burst — replaces the old flat-orange squares.
+const ENEMY_EXPLOSION_COLORS = {
+  ufo: ['#c96bff', '#ffe066'],
+  fighter: ['#ff5c3d', '#ffd23d'],
+  bomber: ['#ff9a3d', '#fff07a'],
+  spaceship: ['#5ecbff', '#ff4d6d'],
+  drone: ['#ff4d4d', '#cfd4ff']
+};
+function explodeEnemy(e){
+  const colors = ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
+  spawnParticles(e.x,e.y,colors[0],20,5,4.5);
+  spawnParticles(e.x,e.y,colors[1],14,4,3.5);
+  spawnParticles(e.x,e.y,'#fff',6,2.5,5);
+  SFX.explosion(Math.min(1.6, 0.7 + e.w/60));
 }
  
 // ---------- Enemy factory ----------
@@ -796,6 +913,7 @@ let spawnTimer = 0;
 function startWave(w){
   spawnQueue = waveComposition(w).sort(()=>Math.random()-0.5);
   spawnTimer = 0;
+  SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
   el.style.opacity = 1;
@@ -806,6 +924,7 @@ function startWave(w){
 function tryFireGun(){
   if(player.fireCd>0) return;
   player.fireCd = 8;
+  SFX.shoot();
   bullets.push({ x:player.x, y:player.y-20, vx:0, vy:-12, w:4,h:10, side:'player' });
   bullets.push({ x:player.x-14, y:player.y-8, vx:-1, vy:-11, w:3,h:8, side:'player' });
   bullets.push({ x:player.x+14, y:player.y-8, vx:1, vy:-11, w:3,h:8, side:'player' });
@@ -823,6 +942,7 @@ function findLockTarget(){
  
 function fireMissile(){
   if(!player.lockTarget || !player.lockTarget.alive) return;
+  SFX.missileLaunch();
   missiles.push({
     x:player.x, y:player.y-10, vx:0, vy:-4, side:'player',
     target: player.lockTarget, speed:6.5, turn:0.09, life:240, w:6,h:12
@@ -835,6 +955,7 @@ function popFlare(){
   if(player.flares<=0 || player.flareCd>0) return;
   player.flares--;
   player.flareCd = 70;
+  SFX.flare();
   flares.push({ x:player.x, y:player.y+10, life:90, maxLife:90 });
   document.getElementById('flarecount').textContent = player.flares;
 }
@@ -868,11 +989,16 @@ function updatePlayer(){
  
   if(missileHeld){
     if(!player.lockTarget || !player.lockTarget.alive){
+      const prevTarget = player.lockTarget;
       player.lockTarget = findLockTarget();
       player.lockProgress = 0;
+      if(player.lockTarget && player.lockTarget!==prevTarget) SFX.lockBeep();
     }
     if(player.lockTarget){
+      const wasReady = player.lockProgress>=40;
       player.lockProgress = Math.min(player.lockProgress+1, 40);
+      if(!wasReady && player.lockProgress%8===0) SFX.lockBeep();
+      if(!wasReady && player.lockProgress>=40) SFX.lockReady();
     }
   } else {
     if(player.lockTarget && player.lockProgress>=40){
@@ -951,8 +1077,10 @@ function updateBombs(){
     b.y += b.vy;
     if(b.y>=H-30){
       spawnParticles(b.x,H-30,'#f80',18,4);
+      SFX.explosionSmall();
       if(Math.abs(b.x-player.x)<40){
         player.hp -= 15; shakeT=10;
+        SFX.playerHit();
       }
       return false;
     }
@@ -978,6 +1106,7 @@ function updateEnemies(){
       e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(50,90);
+        SFX.enemyShoot();
         for(let i=-1;i<=1;i++){
           enemyBullets.push({x:e.x,y:e.y+10,vx:i*1.6,vy:4,w:4,h:4,side:'enemy'});
         }
@@ -990,12 +1119,14 @@ function updateEnemies(){
       e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(40,70);
+        SFX.enemyShoot();
         const ang = Math.atan2(player.y-e.y, player.x-e.x);
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
       }
       e.missileCd--;
       if(e.missileCd<=0){
         e.missileCd = rand(200,320);
+        SFX.missileLaunch();
         missiles.push({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.2,turn:0.045,life:300,w:5,h:10,spawnGrace:15});
       }
     }
@@ -1005,6 +1136,7 @@ function updateEnemies(){
       e.bombCd--;
       if(e.bombCd<=0){
         e.bombCd = rand(100,170);
+        SFX.bombDrop();
         bombs.push({x:e.x,y:e.y+10,vy:3});
       }
     }
@@ -1015,6 +1147,7 @@ function updateEnemies(){
       if(e.laserCd<=0){
         e.laserT = 40;
         e.laserCd = 220;
+        SFX.laser();
       }
       if(e.laserT>0){
         e.laserT--;
@@ -1035,7 +1168,8 @@ function updateEnemies(){
       }
       if(dist(e,player) < 26){
         player.hp -= 20; e.alive=false; e.hp=0;
-        spawnParticles(e.x,e.y,'#f44',20,4); shakeT=8;
+        explodeEnemy(e); shakeT=8;
+        SFX.playerHit();
       }
     }
  
@@ -1073,9 +1207,10 @@ function updateCollisions(){
         e.hp -= 8;
         b.dead = true;
         spawnParticles(b.x,b.y,'#4cf',5,2);
+        SFX.hit();
         if(e.hp<=0){
           e.alive=false; addScore(e.scoreVal);
-          spawnParticles(e.x,e.y,'#fa4',24,4);
+          explodeEnemy(e);
         }
         break;
       }
@@ -1091,6 +1226,7 @@ function updateCollisions(){
         b.dead = true;
         m.dead = true;
         spawnParticles(m.x,m.y,'#fc4',14,4);
+        SFX.explosionSmall();
         break;
       }
     }
@@ -1107,9 +1243,10 @@ function updateCollisions(){
         e.hp -= 45;
         m.dead = true;
         spawnParticles(m.x,m.y,'#8df',18,5);
+        SFX.explosionSmall();
         if(e.hp<=0){
           e.alive=false; addScore(e.scoreVal);
-          spawnParticles(e.x,e.y,'#fa4',26,5);
+          explodeEnemy(e);
         }
         break;
       }
@@ -1125,6 +1262,7 @@ function updateCollisions(){
       if(Math.abs(m.x - e.x) < 5 && m.y > e.y){
         m.dead = true;
         spawnParticles(m.x,m.y,'#0ff',12,4);
+        SFX.explosionSmall();
         break;
       }
     }
@@ -1140,9 +1278,10 @@ function updateCollisions(){
         e.hp -= 20;
         m.dead = true;
         spawnParticles(m.x,m.y,'#f83',16,4);
+        SFX.explosionSmall();
         if(e.hp<=0){
           e.alive=false;
-          spawnParticles(e.x,e.y,'#fa4',20,4);
+          explodeEnemy(e);
           // no score awarded — friendly fire, not a player kill
         }
         break;
@@ -1156,6 +1295,7 @@ function updateCollisions(){
     if(circleHit(b,player,4,14)){
       player.hp -= 5; b.dead=true; shakeT=5;
       spawnParticles(player.x,player.y,'#f66',10,3);
+      SFX.playerHit();
     }
   }
   enemyBullets = enemyBullets.filter(b=>!b.dead);
@@ -1166,12 +1306,14 @@ function updateCollisions(){
     if(circleHit(m,player,6,14)){
       player.hp -= 25; m.dead=true; shakeT=12;
       spawnParticles(player.x,player.y,'#f83',22,5);
+      SFX.playerHit();
     }
     // vs flares (visual only, decoy already handled in targeting)
     for(const f of flares){
       if(circleHit(m,f,6,10)){
         m.dead=true;
         spawnParticles(m.x,m.y,'#fc4',14,4);
+        SFX.explosionSmall();
       }
     }
   }
@@ -1258,7 +1400,8 @@ function drawParticles(){
   for(const p of particles){
     ctx.globalAlpha = p.life/p.maxLife;
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x-1.5,p.y-1.5,3,3);
+    const s = p.size || 3;
+    ctx.fillRect(p.x-s/2,p.y-s/2,s,s);
   }
   ctx.globalAlpha = 1;
 }
@@ -1353,6 +1496,7 @@ async function loadLeaderboard(){
  
 function gameOver(){
   running = false;
+  SFX.gameOver();
   const center = document.getElementById('center');
   center.classList.remove('hidden');
   const savedName = getUsername() || 'PILOT';
@@ -1384,10 +1528,11 @@ function gameOver(){
   `;
   loadLeaderboard();
   loadFlagged();
-  document.getElementById('restartBtn').onclick = resetGame;
-  document.getElementById('skinsBtnGO').onclick = () => openSkinsScreen();
+  document.getElementById('restartBtn').onclick = () => { SFX.uiClick(); resetGame(); };
+  document.getElementById('skinsBtnGO').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
   document.getElementById('changeNameLink').onclick = (e) => {
     e.preventDefault();
+    SFX.uiClick();
     const nameEl = document.getElementById('nameInput');
     if(gamepadIndex !== null){
       openOnScreenKeyboard(nameEl.value, (result) => {
@@ -1399,6 +1544,7 @@ function gameOver(){
     }
   };
   document.getElementById('submitScoreBtn').onclick = async () => {
+    SFX.uiClick();
     const nameEl = document.getElementById('nameInput');
     const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
     const btn = document.getElementById('submitScoreBtn');
@@ -1435,6 +1581,16 @@ function gameOver(){
 function loop(){
   if(!running) return;
   frame++;
+ 
+  if(dyingTimer>0){
+    dyingTimer--;
+    updateParticles();
+    render();
+    if(dyingTimer<=0){ gameOver(); return; }
+    requestAnimationFrame(loop);
+    return;
+  }
+ 
   updatePlayer();
   updateBullets();
   updateMissiles();
@@ -1447,13 +1603,22 @@ function loop(){
   updateHud();
   checkWaveEnd();
   render();
-  if(player.hp<=0 && !godMode){ gameOver(); return; }
+  if(player.hp<=0 && !godMode){
+    spawnParticles(player.x,player.y,'#5ecbff',24,5,4.5);
+    spawnParticles(player.x,player.y,'#ff4d6d',18,4,3.5);
+    spawnParticles(player.x,player.y,'#fff',8,2.5,5);
+    SFX.playerDeath();
+    dyingTimer = 36;
+    requestAnimationFrame(loop);
+    return;
+  }
   requestAnimationFrame(loop);
 }
  
 async function resetGame(){
   await ensureUsername();
   score=0; wave=1;
+  dyingTimer = 0;
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
   player.hp=100; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
@@ -1466,8 +1631,17 @@ async function resetGame(){
   requestAnimationFrame(loop);
 }
  
-document.getElementById('startBtn').onclick = resetGame;
-document.getElementById('skinsBtnStart').onclick = () => openSkinsScreen();
+document.getElementById('startBtn').onclick = () => { SFX.uiClick(); resetGame(); };
+document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+const muteBtnEl = document.getElementById('muteBtn');
+if(muteBtnEl){
+  muteBtnEl.onclick = () => {
+    const nowMuted = !SFX.isMuted();
+    SFX.setMuted(nowMuted);
+    muteBtnEl.textContent = nowMuted ? '🔇' : '🔊';
+    if(!nowMuted) SFX.uiClick();
+  };
+}
 loadLeaderboard();
 loadFlagged();
  
@@ -1765,7 +1939,7 @@ function openSkinsScreen(){
       const btn = document.createElement('div');
       btn.className = 'skinTab' + (cat.key===activeCat ? ' active' : '');
       btn.textContent = cat.label;
-      btn.onclick = () => { activeCat = cat.key; renderTabs(); renderGrid(); };
+      btn.onclick = () => { SFX.uiClick(); activeCat = cat.key; renderTabs(); renderGrid(); };
       tabsEl.appendChild(btn);
     });
   }
@@ -1837,6 +2011,7 @@ function openSkinsScreen(){
  
       card.onclick = () => {
         if(!unlocked) return;
+        SFX.uiClick();
         if(isEnemyCat){
           setEquippedEnemySkin(cat.enemyType, skin.id);
         } else {
@@ -1853,6 +2028,7 @@ function openSkinsScreen(){
   renderGrid();
  
   overlay.querySelector('#skinsCloseBtn').onclick = () => {
+    SFX.uiClick();
     wrap.removeChild(overlay);
   };
 }
@@ -1879,6 +2055,7 @@ function openOnScreenKeyboard(initialValue, onDone){
     btn.className = 'oskKey';
     btn.textContent = k;
     btn.onclick = () => {
+      SFX.uiClick();
       if(value.length < 12){ value += k; updatePreview(); }
     };
     grid.appendChild(btn);
@@ -1888,14 +2065,14 @@ function openOnScreenKeyboard(initialValue, onDone){
   const backBtn = document.createElement('div');
   backBtn.className = 'oskKey oskWide';
   backBtn.textContent = '⌫ BACK';
-  backBtn.onclick = () => { value = value.slice(0,-1); updatePreview(); };
+  backBtn.onclick = () => { SFX.uiClick(); value = value.slice(0,-1); updatePreview(); };
   grid.appendChild(backBtn);
   keyEls.push(backBtn);
  
   const clearBtn = document.createElement('div');
   clearBtn.className = 'oskKey oskWide';
   clearBtn.textContent = 'CLEAR';
-  clearBtn.onclick = () => { value = ''; updatePreview(); };
+  clearBtn.onclick = () => { SFX.uiClick(); value = ''; updatePreview(); };
   grid.appendChild(clearBtn);
   keyEls.push(clearBtn);
  
@@ -1904,6 +2081,7 @@ function openOnScreenKeyboard(initialValue, onDone){
   doneBtn.textContent = 'DONE ✓';
   doneBtn.style.color = '#0f8';
   doneBtn.onclick = () => {
+    SFX.uiClick();
     wrap.removeChild(overlay);
     oskActive = false;
     onDone(value);
