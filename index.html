@@ -303,9 +303,30 @@ window.addEventListener('gamepaddisconnected', (e) => {
 });
  
 function pollGamepad(){
-  if(gamepadIndex === null) return null;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const gp = pads[gamepadIndex];
+  let gp = null;
+ 
+  // prefer the previously locked index if it's still connected
+  if(gamepadIndex !== null && pads[gamepadIndex] && pads[gamepadIndex].connected){
+    gp = pads[gamepadIndex];
+  } else {
+    // fallback: scan for any connected pad, don't rely solely on the connect event
+    for(let i=0;i<pads.length;i++){
+      if(pads[i] && pads[i].connected){
+        gp = pads[i];
+        gamepadIndex = i;
+        const el = document.getElementById('gpIndicator');
+        if(el) el.style.display = 'block';
+        break;
+      }
+    }
+    if(!gp && gamepadIndex !== null){
+      gamepadIndex = null;
+      const el = document.getElementById('gpIndicator');
+      if(el) el.style.display = 'none';
+    }
+  }
+ 
   if(!gp) return null;
  
   let mx = 0, my = 0;
@@ -335,7 +356,7 @@ let cheatReason = '';
 let devMode = false;
 let betaUnlocked = false;
 let godMode = false;
-const DEV_PASSWORD = "796F20686F6C6D657320736D656C6C20796F75206C61746572"; // <-- set your own password here
+const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
  
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
@@ -1199,6 +1220,15 @@ async function ensureUsername(){
     }
   }
 }
+ 
+// Keep scanning for a gamepad even on the menu screen / when not running,
+// so the connection indicator updates and the pad is ready before LAUNCH.
+function idleGamepadPoll(){
+  if(!running) pollGamepad();
+  requestAnimationFrame(idleGamepadPoll);
+}
+idleGamepadPoll();
+ 
 </script>
 </body>
 </html>
