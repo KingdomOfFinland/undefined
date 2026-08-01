@@ -15,6 +15,8 @@
     background:radial-gradient(ellipse at 50% 30%, #0a1428 0%, #05060a 70%);
     border:2px solid #1a4a5a; box-shadow:0 0 30px rgba(0,255,200,0.15);
     display:block;
+    max-width:100vw; max-height:100vh;
+    width:auto; height:auto;
   }
   #hud {
     position:absolute; top:0; left:0; width:100%; padding:10px 16px;
@@ -504,7 +506,7 @@ let killsThisRun = 0;
 let devMode = false;
 let betaUnlocked = false;
 let godMode = false;
-const DEV_PASSWORD = "hgyutiopt"; // <-- set your own password here
+const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
  
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
@@ -2166,4 +2168,5 @@ if(document.getElementById('center')){
 </script>
 </body>
 </html>
+ 
  
