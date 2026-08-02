@@ -436,6 +436,12 @@ const SFX = (() => {
     missilePanicStart(){
       noiseBurst(0.3, {vol:0.1, filterFreq:2500, filterEnd:900});
       tone('sawtooth', 200, 0.4, {vol:0.1, freqEnd:700});
+    },
+    commsJam(){
+      noiseBurst(0.4, {vol:0.13, filterFreq:4000, filterEnd:600, filterType:'bandpass'});
+      tone('square', 1400, 0.06, {vol:0.05, freqEnd:200});
+      setTimeout(()=>tone('square', 900, 0.06, {vol:0.05, freqEnd:150}), 90);
+      setTimeout(()=>tone('square', 1600, 0.06, {vol:0.05, freqEnd:300}), 180);
     }
   };
 })();
@@ -1041,7 +1047,7 @@ const player = {
   alive: true,
   rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
-  shieldAbilityCd:0, missilePanicAbilityCd:0
+  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0
 };
  
 function damagePlayer(amount){
@@ -1089,13 +1095,14 @@ function explodeEnemy(e){
  
 // ---------- Power-ups ----------
 const POWERUP_TYPES = [
-  { id:'rapidfire',    weight:16, color:'#ffd23d', glyph:'R', label:'RAPID FIRE' },
-  { id:'hullrepair',   weight:16, color:'#5cff8a', glyph:'+', label:'HULL REPAIR' },
-  { id:'shield',       weight:16, color:'#5ecbff', glyph:'S', label:'SHIELD' },
-  { id:'spread',       weight:16, color:'#ff9a3d', glyph:'W', label:'SPREAD SHOT' },
-  { id:'flare',        weight:16, color:'#ffae00', glyph:'F', label:'+1 FLARE' },
+  { id:'rapidfire',    weight:13, color:'#ffd23d', glyph:'R', label:'RAPID FIRE' },
+  { id:'hullrepair',   weight:13, color:'#5cff8a', glyph:'+', label:'HULL REPAIR' },
+  { id:'shield',       weight:13, color:'#5ecbff', glyph:'S', label:'SHIELD' },
+  { id:'spread',       weight:13, color:'#ff9a3d', glyph:'W', label:'SPREAD SHOT' },
+  { id:'flare',        weight:13, color:'#ffae00', glyph:'F', label:'+1 FLARE' },
   { id:'scoremult',    weight:15, color:'#ffe066', glyph:'$', label:'SCORE x2' },
-  { id:'missilepanic', weight:5,  color:'#ff3d5c', glyph:'M', label:'MISSILE PANIC' }
+  { id:'missilepanic', weight:5,  color:'#ff3d5c', glyph:'M', label:'MISSILE PANIC' },
+  { id:'commsjam',     weight:15, color:'#b388ff', glyph:'J', label:'COMMS JAM' }
 ];
  
 function pickPowerupType(){
@@ -1139,6 +1146,10 @@ function applyPowerup(type){
       player.missilePanicIdx = 0;
       SFX.missilePanicStart();
       break;
+    case 'commsjam':
+      player.commsJamT = 900;
+      SFX.commsJam();
+      break;
   }
 }
  
@@ -1162,6 +1173,7 @@ function updatePowerupTimers(){
   if(player.scoreMultT>0) player.scoreMultT--;
   if(player.shieldAbilityCd>0) player.shieldAbilityCd--;
   if(player.missilePanicAbilityCd>0) player.missilePanicAbilityCd--;
+  if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
     player.missilePanicCd--;
@@ -1190,7 +1202,8 @@ const BUFF_LABELS = {
   shield:       ['SHIELD', '#5ecbff'],
   spread:       ['SPREAD SHOT', '#ff9a3d'],
   scoremult:    ['SCORE x2', '#ffe066'],
-  missilepanic: ['MISSILE PANIC', '#ff3d5c']
+  missilepanic: ['MISSILE PANIC', '#ff3d5c'],
+  commsjam:     ['ENEMY COMMS JAMMED', '#b388ff']
 };
 function drawBuffHud(){
   const active = [];
@@ -1199,6 +1212,7 @@ function drawBuffHud(){
   if(player.spreadT>0) active.push(['spread', player.spreadT]);
   if(player.scoreMultT>0) active.push(['scoremult', player.scoreMultT]);
   if(player.missilePanicT>0) active.push(['missilepanic', player.missilePanicT]);
+  if(player.commsJamT>0) active.push(['commsjam', player.commsJamT]);
   if(!active.length) return;
   ctx.save();
   ctx.font = '11px "Courier New", monospace';
@@ -1410,12 +1424,23 @@ function updateMissiles(){
  
     // retarget to nearby flare if player missile targeting... actually flares decoy ENEMY missiles
     if(m.side==='enemy'){
-      let decoy = null, bd=90;
-      for(const f of flares){
-        const d = Math.hypot(m.x-f.x, m.y-f.y);
-        if(d<bd){ bd=d; decoy=f; }
+      let tgt;
+      if(player.commsJamT>0){
+        // comms jammed — lost lock on the player, mistakes another enemy as its target
+        if(!m.jamTarget || !m.jamTarget.alive || frame % 45 === 0){
+          const candidates = enemies.filter(en=>en.alive);
+          m.jamTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
+        }
+        tgt = m.jamTarget || player;
+      } else {
+        m.jamTarget = null;
+        let decoy = null, bd=90;
+        for(const f of flares){
+          const d = Math.hypot(m.x-f.x, m.y-f.y);
+          if(d<bd){ bd=d; decoy=f; }
+        }
+        tgt = decoy ? decoy : player;
       }
-      const tgt = decoy ? decoy : player;
       const dx = tgt.x-m.x, dy = tgt.y-m.y;
       const targetAngle = Math.atan2(dy,dx);
       const curAngle = Math.atan2(m.vy,m.vx);
@@ -1559,7 +1584,17 @@ function updateEnemies(){
     else if(e.type==='drone'){
       if(!e.diving && e.y>120) e.diving = Math.random()<0.02;
       if(e.diving){
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        let tgt = player;
+        if(player.commsJamT>0){
+          if(!e.confusedTarget || !e.confusedTarget.alive || frame % 50 === 0){
+            const candidates = enemies.filter(en=>en.alive && en!==e);
+            e.confusedTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
+          }
+          if(e.confusedTarget) tgt = e.confusedTarget;
+        } else {
+          e.confusedTarget = null;
+        }
+        const ang = Math.atan2(tgt.y-e.y, tgt.x-e.x);
         e.x += Math.cos(ang)*e.speed*1.4;
         e.y += Math.sin(ang)*e.speed*1.4;
       } else {
@@ -1570,6 +1605,15 @@ function updateEnemies(){
         e.alive=false; e.hp=0;
         explodeEnemy(e); shakeT=8;
         if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
+      } else if(player.commsJamT>0 && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
+        // confused kamikaze into another enemy — friendly fire, no score
+        e.confusedTarget.hp -= 20;
+        e.alive=false; e.hp=0;
+        explodeEnemy(e);
+        if(e.confusedTarget.hp<=0){
+          e.confusedTarget.alive=false;
+          explodeEnemy(e.confusedTarget);
+        }
       }
     }
  
@@ -2054,7 +2098,7 @@ async function resetGame(){
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
-  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0;
+  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[];
   document.getElementById('score').textContent=0;
   document.getElementById('flarecount').textContent=3;
