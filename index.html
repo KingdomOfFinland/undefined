@@ -715,7 +715,10 @@ const BULLET_SKINS = [
   { id:'ember', name:'Ember', unlock:{type:'score', value:2000}, color:'#ff8844' },
   { id:'toxic', name:'Toxic', unlock:{type:'wave', value:6}, color:'#7fff44' },
   { id:'plasma', name:'Plasma', unlock:{type:'kills', value:200}, color:'#ff44ff' },
-  { id:'gold', name:'Golden Rounds', unlock:{type:'score', value:12000}, color:'#ffd700' }
+  { id:'gold', name:'Golden Rounds', unlock:{type:'score', value:12000}, color:'#ffd700' },
+  { id:'crimson_bullet', name:'Crimson Rounds', unlock:{type:'wave', value:16}, color:'#ff3355' },
+  { id:'coin_bullet', name:'Bounty Rounds', unlock:{type:'coins', value:150}, color:'#ffae00' },
+  { id:'cash_bullet', name:'Reaper Rounds', unlock:{type:'cash', value:6}, color:'#6bff8f' }
 ];
  
 const MISSILE_SKINS = [
@@ -723,13 +726,19 @@ const MISSILE_SKINS = [
   { id:'inferno', name:'Inferno', unlock:{type:'score', value:5000}, color:'#ff4400' },
   { id:'frost', name:'Frost', unlock:{type:'wave', value:8}, color:'#aeefff' },
   { id:'shadow', name:'Shadow', unlock:{type:'kills', value:400}, color:'#8844ff' },
-  { id:'radiant', name:'Radiant', unlock:{type:'score', value:25000}, color:'#ffee00' }
+  { id:'radiant', name:'Radiant', unlock:{type:'score', value:25000}, color:'#ffee00' },
+  { id:'venom', name:'Venom', unlock:{type:'kills', value:700}, color:'#33ff88' },
+  { id:'coin_missile', name:'Bounty Seeker', unlock:{type:'coins', value:200}, color:'#ffd23d' },
+  { id:'cash_missile', name:'Reaper Seeker', unlock:{type:'cash', value:8}, color:'#ff3d5c' }
 ];
  
 const FLARE_SKINS = [
   { id:'default', name:'Standard', unlock:{type:'default'}, color:'255,170,0' },
   { id:'cool', name:'Coolant', unlock:{type:'wave', value:7}, color:'0,200,255' },
-  { id:'royal', name:'Royal', unlock:{type:'kills', value:250}, color:'180,80,255' }
+  { id:'royal', name:'Royal', unlock:{type:'kills', value:250}, color:'180,80,255' },
+  { id:'inferno_flare', name:'Inferno', unlock:{type:'score', value:18000}, color:'255,60,60' },
+  { id:'coin_flare', name:'Bounty Flare', unlock:{type:'coins', value:120}, color:'255,215,0' },
+  { id:'cash_flare', name:'Reaper Flare', unlock:{type:'cash', value:5}, color:'107,255,143' }
 ];
  
 // ---------- Enemy Skins ----------
@@ -750,6 +759,16 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#ff3355'; ctx.strokeStyle='#ffaacc';
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'coin_ufo', name:'Bounty Saucer', unlock:{type:'coins', value:180}, draw(ctx,e){
+      ctx.fillStyle='#ffae00'; ctx.strokeStyle='#ffe066';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ffe066'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'cash_ufo', name:'Reaper Saucer', unlock:{type:'cash', value:7}, draw(ctx,e){
+      ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#6bff8f';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#6bff8f'; ctx.beginPath(); ctx.arc(0,-4,6,0,Math.PI*2); ctx.fill();
     }}
   ],
   fighter: [
@@ -770,6 +789,18 @@ const ENEMY_SKINS = {
       ctx.beginPath();
       ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
       ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'arctic_fighter', name:'Arctic Fighter', unlock:{type:'wave', value:18}, draw(ctx,e){
+      ctx.fillStyle='#c9e8ff'; ctx.strokeStyle='#fff';
+      ctx.beginPath();
+      ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'coin_fighter', name:'Bounty Fighter', unlock:{type:'coins', value:150}, draw(ctx,e){
+      ctx.fillStyle='#ffae00'; ctx.strokeStyle='#ffe066';
+      ctx.beginPath();
+      ctx.moveTo(0,14); ctx.lineTo(11,-10); ctx.lineTo(0,-4); ctx.lineTo(-11,-10);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
     }}
   ],
   bomber: [
@@ -782,6 +813,16 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#c9e8ff'; ctx.strokeStyle='#fff';
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#7ab8e8'; ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
+    }},
+    { id:'shadow_bomber', name:'Shadow Bomber', unlock:{type:'kills', value:300}, draw(ctx,e){
+      ctx.fillStyle='#1a1a22'; ctx.strokeStyle='#666';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#666'; ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
+    }},
+    { id:'cash_bomber', name:'Reaper Bomber', unlock:{type:'cash', value:9}, draw(ctx,e){
+      ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#6bff8f';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#6bff8f'; ctx.fillRect(-e.w/2-8,-3,10,6); ctx.fillRect(e.w/2-2,-3,10,6);
     }}
   ],
   spaceship: [
@@ -794,6 +835,16 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#ff3333';
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#ff3333'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'toxic_cruiser', name:'Toxic Cruiser', unlock:{type:'score', value:22000}, draw(ctx,e){
+      ctx.fillStyle='#2a4b2a'; ctx.strokeStyle='#7fff44';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#7fff44'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'coin_cruiser', name:'Bounty Cruiser', unlock:{type:'coins', value:400}, draw(ctx,e){
+      ctx.fillStyle='#6b5a2a'; ctx.strokeStyle='#ffd700';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
     }}
   ],
   carrier: [
@@ -804,6 +855,46 @@ const ENEMY_SKINS = {
       ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
       ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#8f8'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'crimson_carrier', name:'Crimson Carrier', unlock:{type:'wave', value:16}, draw(ctx,e){
+      ctx.fillStyle='#6b2a2a'; ctx.strokeStyle='#ff6b6b';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ff6b6b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'arctic_carrier', name:'Arctic Carrier', unlock:{type:'score', value:9000}, draw(ctx,e){
+      ctx.fillStyle='#c9e8ff'; ctx.strokeStyle='#fff';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#7ab8e8'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'shadow_carrier', name:'Shadow Carrier', unlock:{type:'kills', value:350}, draw(ctx,e){
+      ctx.fillStyle='#1a1a22'; ctx.strokeStyle='#666';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'coin_carrier', name:'Bounty Carrier', unlock:{type:'coins', value:350}, draw(ctx,e){
+      ctx.fillStyle='#6b5a2a'; ctx.strokeStyle='#ffd700';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'cash_carrier', name:'Reaper Carrier', unlock:{type:'cash', value:15}, draw(ctx,e){
+      ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#6bff8f';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#6bff8f'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
     }}
   ],
   drone: [
@@ -817,6 +908,20 @@ const ENEMY_SKINS = {
     { id:'night_drone', name:'Night Drone', unlock:{type:'kills', value:600}, draw(ctx,e){
       ctx.fillStyle= e.diving ? '#ff3333' : '#1a1a22';
       ctx.strokeStyle='#555';
+      ctx.beginPath();
+      ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'crimson_drone', name:'Crimson Drone', unlock:{type:'wave', value:20}, draw(ctx,e){
+      ctx.fillStyle= e.diving ? '#ff3333' : '#6b2a2a';
+      ctx.strokeStyle='#ff6b6b';
+      ctx.beginPath();
+      ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }},
+    { id:'coin_drone', name:'Bounty Drone', unlock:{type:'coins', value:100}, draw(ctx,e){
+      ctx.fillStyle= e.diving ? '#ff3333' : '#ffae00';
+      ctx.strokeStyle='#ffe066';
       ctx.beginPath();
       ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
       ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -1431,10 +1536,13 @@ function updateEnemies(){
       e.x += Math.sin(e.phase*0.3)*0.9;
       e.fireCd--;
       if(e.fireCd<=0){
-        e.fireCd = rand(70,110);
-        SFX.enemyShoot();
+        e.fireCd = rand(140,190);
+        SFX.missileLaunch();
         for(let i=-1;i<=1;i++){
-          enemyBullets.push({x:e.x+i*20,y:e.y+12,vx:i*0.8,vy:4,w:4,h:4,side:'enemy'});
+          missiles.push({
+            x:e.x+i*20, y:e.y+12, vx:i*0.8, vy:3, side:'enemy',
+            speed:4, turn:0.04, life:300, w:5,h:10, spawnGrace:15
+          });
         }
       }
       e.launchCd--;
