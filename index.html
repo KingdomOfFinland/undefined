@@ -422,7 +422,16 @@ const SFX = (() => {
       setTimeout(()=>tone('sawtooth', 200, 0.35, {vol:0.09, freqEnd:80}), 220);
       setTimeout(()=>tone('sawtooth', 120, 0.5, {vol:0.11, freqEnd:40}), 460);
     },
-    uiClick(){ tone('square', 520, 0.045, {vol:0.045}); }
+    uiClick(){ tone('square', 520, 0.045, {vol:0.045}); },
+    powerupPickup(){
+      tone('square', 660, 0.09, {vol:0.07, freqEnd:1100});
+      setTimeout(()=>tone('square', 990, 0.1, {vol:0.06, freqEnd:1400}), 70);
+    },
+    shieldBlock(){ tone('square', 500, 0.08, {vol:0.06, freqEnd:900}); },
+    missilePanicStart(){
+      noiseBurst(0.3, {vol:0.1, filterFreq:2500, filterEnd:900});
+      tone('sawtooth', 200, 0.4, {vol:0.1, freqEnd:700});
+    }
   };
 })();
  
@@ -843,8 +852,18 @@ const player = {
   fireCd: 0,
   flares: 3, flareCd: 0,
   lockTarget: null, lockProgress: 0,
-  alive: true
+  alive: true,
+  rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0,
+  missilePanicT:0, missilePanicCd:0, missilePanicIdx:0
 };
+ 
+function damagePlayer(amount){
+  if(player.shieldT>0) return false;
+  player.hp -= amount;
+  return true;
+}
+ 
+let powerups = [];
  
 let bullets = [];      // player guns
 let enemyBullets = [];
@@ -878,6 +897,145 @@ function explodeEnemy(e){
   spawnParticles(e.x,e.y,colors[1],14,4,3.5);
   spawnParticles(e.x,e.y,'#fff',6,2.5,5);
   SFX.explosion(Math.min(1.6, 0.7 + e.w/60));
+}
+ 
+// ---------- Power-ups ----------
+const POWERUP_TYPES = [
+  { id:'rapidfire',    weight:16, color:'#ffd23d', glyph:'R', label:'RAPID FIRE' },
+  { id:'hullrepair',   weight:16, color:'#5cff8a', glyph:'+', label:'HULL REPAIR' },
+  { id:'shield',       weight:16, color:'#5ecbff', glyph:'S', label:'SHIELD' },
+  { id:'spread',       weight:16, color:'#ff9a3d', glyph:'W', label:'SPREAD SHOT' },
+  { id:'flare',        weight:16, color:'#ffae00', glyph:'F', label:'+1 FLARE' },
+  { id:'scoremult',    weight:15, color:'#ffe066', glyph:'$', label:'SCORE x2' },
+  { id:'missilepanic', weight:5,  color:'#ff3d5c', glyph:'M', label:'MISSILE PANIC' }
+];
+ 
+function pickPowerupType(){
+  const total = POWERUP_TYPES.reduce((s,t)=>s+t.weight,0);
+  let r = Math.random()*total;
+  for(const t of POWERUP_TYPES){
+    if(r < t.weight) return t.id;
+    r -= t.weight;
+  }
+  return POWERUP_TYPES[0].id;
+}
+ 
+// Only rolled from kills the player actually scored (see addScore call sites).
+function maybeDropPowerup(e){
+  const chance = e.scoreVal>=250 ? 0.4 : 0.18;
+  if(Math.random() < chance){
+    powerups.push({ x:e.x, y:e.y, vy:1.3, type: pickPowerupType(), life:600, phase: rand(0,Math.PI*2) });
+  }
+}
+ 
+function applyPowerup(type){
+  SFX.powerupPickup();
+  spawnParticles(player.x, player.y, '#fff', 14, 3, 3);
+  switch(type){
+    case 'rapidfire': player.rapidFireT = 480; break;
+    case 'hullrepair': player.hp = Math.min(player.maxHp, player.hp+30); break;
+    case 'shield': player.shieldT = 360; break;
+    case 'spread': player.spreadT = 600; break;
+    case 'flare':
+      player.flares = Math.min(5, player.flares+1);
+      document.getElementById('flarecount').textContent = player.flares;
+      break;
+    case 'scoremult': player.scoreMultT = 720; break;
+    case 'missilepanic':
+      player.missilePanicT = 600;
+      player.missilePanicCd = 0;
+      player.missilePanicIdx = 0;
+      SFX.missilePanicStart();
+      break;
+  }
+}
+ 
+function updatePowerups(){
+  powerups = powerups.filter(p=>{
+    p.y += p.vy;
+    p.life--;
+    if(p.life<=0 || p.y>H+30) return false;
+    if(circleHit(p,player,13,15)){
+      applyPowerup(p.type);
+      return false;
+    }
+    return true;
+  });
+}
+ 
+function updatePowerupTimers(){
+  if(player.rapidFireT>0) player.rapidFireT--;
+  if(player.shieldT>0) player.shieldT--;
+  if(player.spreadT>0) player.spreadT--;
+  if(player.scoreMultT>0) player.scoreMultT--;
+  if(player.missilePanicT>0){
+    player.missilePanicT--;
+    player.missilePanicCd--;
+    if(player.missilePanicCd<=0){
+      missilePanicFire();
+      player.missilePanicCd = 7;
+    }
+  }
+}
+ 
+function missilePanicFire(){
+  const alive = enemies.filter(e=>e.alive);
+  if(!alive.length) return;
+  if(player.missilePanicIdx >= alive.length) player.missilePanicIdx = 0;
+  const target = alive[player.missilePanicIdx % alive.length];
+  player.missilePanicIdx++;
+  missiles.push({
+    x:player.x, y:player.y-10, vx:0, vy:-4, side:'player',
+    target, speed:7.5, turn:0.16, life:240, w:6,h:12
+  });
+  SFX.missileLaunch();
+}
+ 
+const BUFF_LABELS = {
+  rapidfire:    ['RAPID FIRE', '#ffd23d'],
+  shield:       ['SHIELD', '#5ecbff'],
+  spread:       ['SPREAD SHOT', '#ff9a3d'],
+  scoremult:    ['SCORE x2', '#ffe066'],
+  missilepanic: ['MISSILE PANIC', '#ff3d5c']
+};
+function drawBuffHud(){
+  const active = [];
+  if(player.rapidFireT>0) active.push(['rapidfire', player.rapidFireT]);
+  if(player.shieldT>0) active.push(['shield', player.shieldT]);
+  if(player.spreadT>0) active.push(['spread', player.spreadT]);
+  if(player.scoreMultT>0) active.push(['scoremult', player.scoreMultT]);
+  if(player.missilePanicT>0) active.push(['missilepanic', player.missilePanicT]);
+  if(!active.length) return;
+  ctx.save();
+  ctx.font = '11px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  let y = 48;
+  for(const [id,t] of active){
+    const [label,color] = BUFF_LABELS[id];
+    ctx.fillStyle = color;
+    ctx.shadowColor = color; ctx.shadowBlur = 6;
+    ctx.fillText(`${label} ${(t/60).toFixed(1)}s`, W/2, y);
+    y += 14;
+  }
+  ctx.restore();
+}
+ 
+function drawPowerups(){
+  for(const p of powerups){
+    const info = POWERUP_TYPES.find(t=>t.id===p.type);
+    const bob = Math.sin(p.phase + frame*0.08)*4;
+    ctx.save();
+    ctx.translate(p.x, p.y+bob);
+    ctx.shadowColor = info.color; ctx.shadowBlur = 14;
+    ctx.fillStyle = info.color;
+    ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#001018';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(info.glyph, 0, 1);
+    ctx.restore();
+  }
 }
  
 // ---------- Enemy factory ----------
@@ -925,11 +1083,15 @@ function startWave(w){
 // ---------- Input actions ----------
 function tryFireGun(){
   if(player.fireCd>0) return;
-  player.fireCd = 8;
+  player.fireCd = player.rapidFireT>0 ? 4 : 8;
   SFX.shoot();
   bullets.push({ x:player.x, y:player.y-20, vx:0, vy:-12, w:4,h:10, side:'player' });
   bullets.push({ x:player.x-14, y:player.y-8, vx:-1, vy:-11, w:3,h:8, side:'player' });
   bullets.push({ x:player.x+14, y:player.y-8, vx:1, vy:-11, w:3,h:8, side:'player' });
+  if(player.spreadT>0){
+    bullets.push({ x:player.x-22, y:player.y-2, vx:-2.2, vy:-10.5, w:3,h:8, side:'player' });
+    bullets.push({ x:player.x+22, y:player.y-2, vx:2.2, vy:-10.5, w:3,h:8, side:'player' });
+  }
 }
  
 function findLockTarget(){
@@ -989,7 +1151,7 @@ function updatePlayer(){
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
  
-  if(missileHeld){
+  if(missileHeld && player.missilePanicT<=0){
     if(!player.lockTarget || !player.lockTarget.alive){
       const prevTarget = player.lockTarget;
       player.lockTarget = findLockTarget();
@@ -1002,7 +1164,7 @@ function updatePlayer(){
       if(!wasReady && player.lockProgress%8===0) SFX.lockBeep();
       if(!wasReady && player.lockProgress>=40) SFX.lockReady();
     }
-  } else {
+  } else if(player.missilePanicT<=0){
     if(player.lockTarget && player.lockProgress>=40){
       fireMissile();
     } else {
@@ -1014,7 +1176,7 @@ function updatePlayer(){
   if(gp) gamepadPrev.tri = gp.triBtn;
  
   const lockEl = document.getElementById('lockind');
-  lockEl.style.display = (player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
+  lockEl.style.display = (player.missilePanicT<=0 && player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
 }
  
 function updateBullets(){
@@ -1081,8 +1243,7 @@ function updateBombs(){
       spawnParticles(b.x,H-30,'#f80',18,4);
       SFX.explosionSmall();
       if(Math.abs(b.x-player.x)<40){
-        player.hp -= 15; shakeT=10;
-        SFX.playerHit();
+        if(damagePlayer(15)){ shakeT=10; SFX.playerHit(); } else { SFX.shieldBlock(); }
       }
       return false;
     }
@@ -1154,7 +1315,7 @@ function updateEnemies(){
       if(e.laserT>0){
         e.laserT--;
         if(Math.abs(e.x-player.x)<24 && e.laserT%3===0){
-          player.hp -= 1.5; shakeT=4;
+          if(damagePlayer(1.5)) shakeT=4;
         }
       }
     }
@@ -1169,9 +1330,9 @@ function updateEnemies(){
         e.x += Math.sin(e.phase)*1.5;
       }
       if(dist(e,player) < 26){
-        player.hp -= 20; e.alive=false; e.hp=0;
+        e.alive=false; e.hp=0;
         explodeEnemy(e); shakeT=8;
-        SFX.playerHit();
+        if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
       }
     }
  
@@ -1188,15 +1349,17 @@ function addScore(amount){
   const now = performance.now();
  
   // condition: single gain over 600 (max legit single kill is the 600-pt spaceship boss)
+  // checked against the base amount so the SCORE x2 power-up doesn't trip this
   if(amount > 600){
     cheatFlagged = true;
     cheatReason = 'DEVTOOLS/HACK USED (single gain > 600)';
   }
  
-  scoreLog.push({ delta: amount, ts: now, frame });
+  const finalAmount = player.scoreMultT>0 ? amount*2 : amount;
+  scoreLog.push({ delta: finalAmount, ts: now, frame });
   if(scoreLog.length > 50) scoreLog.shift();
  
-  score += amount;
+  score += finalAmount;
   document.getElementById('score').textContent = score;
 }
  
@@ -1213,6 +1376,7 @@ function updateCollisions(){
         if(e.hp<=0){
           e.alive=false; addScore(e.scoreVal);
           explodeEnemy(e);
+          maybeDropPowerup(e);
         }
         break;
       }
@@ -1249,6 +1413,7 @@ function updateCollisions(){
         if(e.hp<=0){
           e.alive=false; addScore(e.scoreVal);
           explodeEnemy(e);
+          maybeDropPowerup(e);
         }
         break;
       }
@@ -1295,9 +1460,15 @@ function updateCollisions(){
   // enemy bullets vs player
   for(const b of enemyBullets){
     if(circleHit(b,player,4,14)){
-      player.hp -= 5; b.dead=true; shakeT=5;
-      spawnParticles(player.x,player.y,'#f66',10,3);
-      SFX.playerHit();
+      b.dead=true;
+      if(damagePlayer(5)){
+        shakeT=5;
+        spawnParticles(player.x,player.y,'#f66',10,3);
+        SFX.playerHit();
+      } else {
+        spawnParticles(player.x,player.y,'#5ecbff',8,2.5);
+        SFX.shieldBlock();
+      }
     }
   }
   enemyBullets = enemyBullets.filter(b=>!b.dead);
@@ -1306,9 +1477,16 @@ function updateCollisions(){
   for(const m of missiles){
     if(m.side!=='enemy') continue;
     if(circleHit(m,player,6,14)){
-      player.hp -= 25; m.dead=true; shakeT=12;
-      spawnParticles(player.x,player.y,'#f83',22,5);
-      SFX.playerHit();
+      m.dead=true;
+      if(damagePlayer(25)){
+        shakeT=12;
+        spawnParticles(player.x,player.y,'#f83',22,5);
+        SFX.playerHit();
+      } else {
+        shakeT=4;
+        spawnParticles(player.x,player.y,'#5ecbff',16,3.5);
+        SFX.shieldBlock();
+      }
     }
     // vs flares (visual only, decoy already handled in targeting)
     for(const f of flares){
@@ -1339,6 +1517,13 @@ function drawPlayer(){
   const equipped = getEquippedSkins();
   const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
   shipSkin.draw(ctx, thrusting);
+  if(player.shieldT>0){
+    const pulse = 1 + Math.sin(frame*0.2)*0.06;
+    ctx.strokeStyle = 'rgba(94,203,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#5ecbff'; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(0,0,26*pulse,0,Math.PI*2); ctx.stroke();
+  }
   ctx.restore();
 }
  
@@ -1447,12 +1632,14 @@ function render(){
   drawStars();
   drawFlares();
   drawBombs();
+  drawPowerups();
   drawLockLine();
   for(const e of enemies) drawEnemy(e);
   drawBullets();
   drawMissiles();
   drawPlayer();
   drawParticles();
+  drawBuffHud();
   ctx.restore();
 }
  
@@ -1594,12 +1781,14 @@ function loop(){
   }
  
   updatePlayer();
+  updatePowerupTimers();
   updateBullets();
   updateMissiles();
   updateFlares();
   updateBombs();
   updateEnemies();
   updateCollisions();
+  updatePowerups();
   if(godMode) player.hp = player.maxHp;
   updateParticles();
   updateHud();
@@ -1624,7 +1813,9 @@ async function resetGame(){
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
   player.hp=100; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
-  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[];
+  player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
+  player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
+  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[];
   document.getElementById('score').textContent=0;
   document.getElementById('flarecount').textContent=3;
   document.getElementById('center').classList.add('hidden');
