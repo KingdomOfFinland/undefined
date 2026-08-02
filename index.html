@@ -442,6 +442,12 @@ const SFX = (() => {
       tone('square', 1400, 0.06, {vol:0.05, freqEnd:200});
       setTimeout(()=>tone('square', 900, 0.06, {vol:0.05, freqEnd:150}), 90);
       setTimeout(()=>tone('square', 1600, 0.06, {vol:0.05, freqEnd:300}), 180);
+    },
+    backupCall(){
+      tone('square', 700, 0.08, {vol:0.06});
+      setTimeout(()=>tone('square', 900, 0.08, {vol:0.06}), 100);
+      setTimeout(()=>tone('square', 1100, 0.12, {vol:0.07}), 200);
+      noiseBurst(0.15, {vol:0.05, filterFreq:2500, filterEnd:1200});
     }
   };
 })();
@@ -513,8 +519,9 @@ function pollGamepad(){
   const rtBtn = gp.buttons[7] && gp.buttons[7].pressed;  // R2/RT = shield ability
   const rbBtn = gp.buttons[5] && gp.buttons[5].pressed;  // R1/RB = missile panic ability
   const lbBtn = gp.buttons[4] && gp.buttons[4].pressed;  // L1/LB = comms jam ability
+  const ltBtn = gp.buttons[6] && gp.buttons[6].pressed;  // L2/LT = call backup
  
-  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn };
+  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn };
 }
  
 let running = false;
@@ -1058,6 +1065,104 @@ function damagePlayer(amount){
 }
  
 let powerups = [];
+let allies = [];
+ 
+function damageAlly(a, amount){
+  if(a.shieldT>0) return false;
+  a.hp -= amount;
+  if(a.hp<=0 && a.alive){
+    a.alive = false;
+    spawnParticles(a.x,a.y,'#4ecdc4',16,4,3.5);
+    spawnParticles(a.x,a.y,'#fff',6,2.5,4);
+    SFX.explosion(0.8);
+  }
+  return true;
+}
+ 
+// Fills the squad up to 4 allies (adds only as many as are missing).
+function spawnAllies(count){
+  const formation = [{dx:-60,dy:-10},{dx:-105,dy:20},{dx:60,dy:-10},{dx:105,dy:20}];
+  const existing = allies.filter(a=>a.alive).length;
+  const toAdd = Math.max(0, Math.min(count, 4-existing));
+  for(let i=0;i<toAdd;i++){
+    const slot = formation[(existing+i) % formation.length];
+    allies.push({
+      x: player.x+slot.dx, y: player.y+slot.dy, hp:75, maxHp:75, alive:true,
+      formOffset: slot, fireCd: rand(20,40),
+      rapidFireT:0, shieldT:0, spreadT:0, phase: rand(0,Math.PI*2)
+    });
+  }
+  if(toAdd>0) SFX.backupCall();
+}
+ 
+function updateAllies(){
+  for(const a of allies){
+    if(!a.alive) continue;
+    if(a.rapidFireT>0) a.rapidFireT--;
+    if(a.shieldT>0) a.shieldT--;
+    if(a.spreadT>0) a.spreadT--;
+ 
+    const tx = player.x + a.formOffset.dx;
+    const ty = player.y + a.formOffset.dy;
+    a.x += (tx-a.x)*0.08;
+    a.y += (ty-a.y)*0.08;
+    a.phase += 0.05;
+ 
+    a.fireCd--;
+    if(a.fireCd<=0){
+      let nearest=null, bd=99999;
+      for(const e of enemies){
+        if(!e.alive) continue;
+        const d = dist(a,e);
+        if(d<bd){ bd=d; nearest=e; }
+      }
+      if(nearest && bd<420){
+        const ang = Math.atan2(nearest.y-a.y, nearest.x-a.x);
+        SFX.shoot();
+        bullets.push({x:a.x,y:a.y,vx:Math.cos(ang)*10,vy:Math.sin(ang)*10,w:4,h:8,side:'player'});
+        if(a.spreadT>0){
+          bullets.push({x:a.x,y:a.y,vx:Math.cos(ang-0.25)*10,vy:Math.sin(ang-0.25)*10,w:3,h:6,side:'player'});
+          bullets.push({x:a.x,y:a.y,vx:Math.cos(ang+0.25)*10,vy:Math.sin(ang+0.25)*10,w:3,h:6,side:'player'});
+        }
+      }
+      a.fireCd = a.rapidFireT>0 ? 14 : 28;
+    }
+  }
+  allies = allies.filter(a=>a.alive);
+}
+ 
+function applyAllyPowerup(a, type){
+  spawnParticles(a.x,a.y,'#fff',10,3,3);
+  SFX.powerupPickup();
+  switch(type){
+    case 'rapidfire': a.rapidFireT = 480; break;
+    case 'shield': a.shieldT = 360; break;
+    case 'spread': a.spreadT = 600; break;
+    case 'commsjam': player.commsJamT = 900; SFX.commsJam(); break;
+  }
+}
+ 
+function drawAllies(){
+  for(const a of allies){
+    if(!a.alive) continue;
+    ctx.save();
+    ctx.translate(a.x,a.y);
+    ctx.fillStyle='#2a9d8f'; ctx.strokeStyle='#4ecdc4'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-11); ctx.lineTo(8,9); ctx.lineTo(0,4); ctx.lineTo(-8,9);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if(a.shieldT>0){
+      const pulse = 1 + Math.sin(frame*0.2)*0.06;
+      ctx.strokeStyle='rgba(94,203,255,0.7)'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(0,0,16*pulse,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+    if(a.hp<a.maxHp){
+      ctx.fillStyle='#300'; ctx.fillRect(a.x-14,a.y-20,28,3);
+      ctx.fillStyle='#4ecdc4'; ctx.fillRect(a.x-14,a.y-20,28*(a.hp/a.maxHp),3);
+    }
+  }
+}
  
 let bullets = [];      // player guns
 let enemyBullets = [];
@@ -1103,7 +1208,8 @@ const POWERUP_TYPES = [
   { id:'flare',        weight:13, color:'#ffae00', glyph:'F', label:'+1 FLARE' },
   { id:'scoremult',    weight:15, color:'#ffe066', glyph:'$', label:'SCORE x2' },
   { id:'missilepanic', weight:5,  color:'#ff3d5c', glyph:'M', label:'MISSILE PANIC' },
-  { id:'commsjam',     weight:15, color:'#b388ff', glyph:'J', label:'COMMS JAM' }
+  { id:'commsjam',     weight:15, color:'#b388ff', glyph:'J', label:'COMMS JAM' },
+  { id:'backup',       weight:0.1, color:'#4ecdc4', glyph:'B', label:'BACKUP' }
 ];
  
 function pickPowerupType(){
@@ -1151,9 +1257,13 @@ function applyPowerup(type){
       player.commsJamT = 900;
       SFX.commsJam();
       break;
+    case 'backup':
+      spawnAllies(4);
+      break;
   }
 }
  
+const ALLY_USABLE_POWERUPS = ['rapidfire','shield','spread','commsjam'];
 function updatePowerups(){
   powerups = powerups.filter(p=>{
     p.y += p.vy;
@@ -1162,6 +1272,15 @@ function updatePowerups(){
     if(circleHit(p,player,13,15)){
       applyPowerup(p.type);
       return false;
+    }
+    if(ALLY_USABLE_POWERUPS.includes(p.type)){
+      for(const a of allies){
+        if(!a.alive) continue;
+        if(circleHit(p,a,13,15)){
+          applyAllyPowerup(a, p.type);
+          return false;
+        }
+      }
     }
     return true;
   });
@@ -1363,6 +1482,7 @@ function updatePlayer(){
   const shieldAbilityHeld = keys['c'] || (gp && gp.rtBtn);
   const missilePanicAbilityHeld = keys['alt'] || (gp && gp.rbBtn);
   const commsJamAbilityHeld = keys['v'] || (gp && gp.lbBtn);
+  const backupAbilityHeld = keys['b'] || (gp && gp.ltBtn);
  
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
@@ -1383,6 +1503,9 @@ function updatePlayer(){
     player.commsJamT = 1200; // 20s when bought (natural pickup stays 15s / 900 frames)
     player.commsJamAbilityCd = 3000; // 50s cooldown
     SFX.commsJam();
+  }
+  if(backupAbilityHeld && hasAbility('backup_ability') && allies.filter(a=>a.alive).length===0){
+    spawnAllies(4);
   }
  
   if(missileHeld && player.missilePanicT<=0){
@@ -1760,6 +1883,21 @@ function updateCollisions(){
         spawnParticles(player.x,player.y,'#5ecbff',8,2.5);
         SFX.shieldBlock();
       }
+      continue;
+    }
+    for(const a of allies){
+      if(!a.alive) continue;
+      if(circleHit(b,a,4,14)){
+        b.dead=true;
+        if(damageAlly(a,5)){
+          spawnParticles(a.x,a.y,'#f66',8,3);
+          SFX.hit();
+        } else {
+          spawnParticles(a.x,a.y,'#5ecbff',6,2.5);
+          SFX.shieldBlock();
+        }
+        break;
+      }
     }
   }
   enemyBullets = enemyBullets.filter(b=>!b.dead);
@@ -1777,6 +1915,21 @@ function updateCollisions(){
         shakeT=4;
         spawnParticles(player.x,player.y,'#5ecbff',16,3.5);
         SFX.shieldBlock();
+      }
+    } else {
+      for(const a of allies){
+        if(!a.alive) continue;
+        if(circleHit(m,a,6,14)){
+          m.dead=true;
+          if(damageAlly(a,25)){
+            spawnParticles(a.x,a.y,'#f83',14,4);
+            SFX.playerHit();
+          } else {
+            spawnParticles(a.x,a.y,'#5ecbff',10,3);
+            SFX.shieldBlock();
+          }
+          break;
+        }
       }
     }
     // vs flares (visual only, decoy already handled in targeting)
@@ -1926,6 +2079,7 @@ function render(){
   drawPowerups();
   drawLockLine();
   for(const e of enemies) drawEnemy(e);
+  drawAllies();
   drawBullets();
   drawMissiles();
   drawPlayer();
@@ -2078,6 +2232,7 @@ function loop(){
   updateFlares();
   updateBombs();
   updateEnemies();
+  updateAllies();
   updateCollisions();
   updatePowerups();
   if(godMode) player.hp = player.maxHp;
@@ -2107,7 +2262,7 @@ async function resetGame(){
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0;
-  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[];
+  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[];
   document.getElementById('score').textContent=0;
   document.getElementById('flarecount').textContent=3;
   updateCurrencyHud();
@@ -2394,7 +2549,8 @@ navGamepadTick();
 const ABILITY_DEFS = [
   { id:'shield_ability', name:'Shield Burst', desc:'On-demand 6s shield. Cooldown 20s.', costType:'coins', cost:400, keyLabel:'C', gpLabel:'RT', color:'#5ecbff' },
   { id:'missilepanic_ability', name:'Missile Panic', desc:'On-demand 10s missile barrage — locks every enemy on screen. Cooldown 30s.', costType:'cash', cost:12, keyLabel:'ALT', gpLabel:'RB', color:'#ff3d5c' },
-  { id:'commsjam_ability', name:'Comms Jam', desc:'On-demand 20s enemy comms jam — missiles and drones turn on each other. Cooldown 50s.', costType:'coins', cost:450, keyLabel:'V', gpLabel:'LB', color:'#b388ff' }
+  { id:'commsjam_ability', name:'Comms Jam', desc:'On-demand 20s enemy comms jam — missiles and drones turn on each other. Cooldown 50s.', costType:'coins', cost:450, keyLabel:'V', gpLabel:'LB', color:'#b388ff' },
+  { id:'backup_ability', name:'Call Backup', desc:'Calls in 4 fighter escorts (75 HP each). Usable again once your squad is wiped.', costType:'cash', cost:20, keyLabel:'B', gpLabel:'LT', color:'#4ecdc4' }
 ];
  
 function openSkinsScreen(){
