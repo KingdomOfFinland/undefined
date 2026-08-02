@@ -480,6 +480,11 @@ const SFX = (() => {
       setTimeout(()=>tone('square', 900, 0.08, {vol:0.06}), 100);
       setTimeout(()=>tone('square', 1100, 0.12, {vol:0.07}), 200);
       noiseBurst(0.15, {vol:0.05, filterFreq:2500, filterEnd:1200});
+    },
+    emergencyHeal(){
+      tone('sine', 440, 0.18, {vol:0.09, freqEnd:880});
+      setTimeout(()=>tone('sine', 660, 0.22, {vol:0.09, freqEnd:1320}), 120);
+      noiseBurst(0.2, {vol:0.05, filterFreq:3000, filterEnd:1500});
     }
   };
 })();
@@ -552,8 +557,9 @@ function pollGamepad(){
   const rbBtn = gp.buttons[5] && gp.buttons[5].pressed;  // R1/RB = missile panic ability
   const lbBtn = gp.buttons[4] && gp.buttons[4].pressed;  // L1/LB = comms jam ability
   const ltBtn = gp.buttons[6] && gp.buttons[6].pressed;  // L2/LT = call backup
+  const selectBtn = gp.buttons[8] && gp.buttons[8].pressed; // Select/Back/View = emergency healing
  
-  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn };
+  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn };
 }
  
 let running = false;
@@ -1139,7 +1145,7 @@ const player = {
   alive: true,
   rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
-  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0
+  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0
 };
  
 function damagePlayer(amount){
@@ -1378,6 +1384,7 @@ function updatePowerupTimers(){
   if(player.shieldAbilityCd>0) player.shieldAbilityCd--;
   if(player.missilePanicAbilityCd>0) player.missilePanicAbilityCd--;
   if(player.commsJamAbilityCd>0) player.commsJamAbilityCd--;
+  if(player.emergencyHealCd>0) player.emergencyHealCd--;
   if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
@@ -1567,6 +1574,7 @@ function updatePlayer(){
   const missilePanicAbilityHeld = keys['alt'] || (gp && gp.rbBtn);
   const commsJamAbilityHeld = keys['v'] || (gp && gp.lbBtn);
   const backupAbilityHeld = keys['b'] || (gp && gp.ltBtn);
+  const emergencyHealHeld = keys['h'] || (gp && gp.selectBtn);
  
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
@@ -1590,6 +1598,12 @@ function updatePlayer(){
   }
   if(backupAbilityHeld && hasAbility('backup_ability') && allies.filter(a=>a.alive).length===0){
     spawnAllies(4);
+  }
+  if(emergencyHealHeld && player.emergencyHealCd<=0 && player.hp<player.maxHp){
+    player.hp = player.maxHp;
+    player.emergencyHealCd = 7200; // 2 min cooldown
+    spawnParticles(player.x,player.y,'#5cff8a',20,4,4);
+    SFX.emergencyHeal();
   }
  
   if(missileHeld && player.missilePanicT<=0){
@@ -2370,7 +2384,7 @@ async function resetGame(){
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
-  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0;
+  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[];
   document.getElementById('score').textContent=0;
   document.getElementById('flarecount').textContent=3;
