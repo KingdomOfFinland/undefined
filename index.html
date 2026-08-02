@@ -512,8 +512,9 @@ function pollGamepad(){
   const triBtn = gp.buttons[3] && gp.buttons[3].pressed; // Triangle = flare
   const rtBtn = gp.buttons[7] && gp.buttons[7].pressed;  // R2/RT = shield ability
   const rbBtn = gp.buttons[5] && gp.buttons[5].pressed;  // R1/RB = missile panic ability
+  const lbBtn = gp.buttons[4] && gp.buttons[4].pressed;  // L1/LB = comms jam ability
  
-  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn };
+  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn };
 }
  
 let running = false;
@@ -1047,7 +1048,7 @@ const player = {
   alive: true,
   rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
-  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0
+  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0
 };
  
 function damagePlayer(amount){
@@ -1173,6 +1174,7 @@ function updatePowerupTimers(){
   if(player.scoreMultT>0) player.scoreMultT--;
   if(player.shieldAbilityCd>0) player.shieldAbilityCd--;
   if(player.missilePanicAbilityCd>0) player.missilePanicAbilityCd--;
+  if(player.commsJamAbilityCd>0) player.commsJamAbilityCd--;
   if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
@@ -1360,6 +1362,7 @@ function updatePlayer(){
   const flarePressed = keys['f'] || (gp && gp.triBtn && !gamepadPrev.tri);
   const shieldAbilityHeld = keys['c'] || (gp && gp.rtBtn);
   const missilePanicAbilityHeld = keys['alt'] || (gp && gp.rbBtn);
+  const commsJamAbilityHeld = keys['v'] || (gp && gp.lbBtn);
  
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
@@ -1375,6 +1378,11 @@ function updatePlayer(){
     player.missilePanicIdx = 0;
     player.missilePanicAbilityCd = 1800;
     SFX.missilePanicStart();
+  }
+  if(commsJamAbilityHeld && hasAbility('commsjam_ability') && player.commsJamAbilityCd<=0){
+    player.commsJamT = 1200; // 20s when bought (natural pickup stays 15s / 900 frames)
+    player.commsJamAbilityCd = 3000; // 50s cooldown
+    SFX.commsJam();
   }
  
   if(missileHeld && player.missilePanicT<=0){
@@ -2098,7 +2106,7 @@ async function resetGame(){
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
-  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0;
+  player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[];
   document.getElementById('score').textContent=0;
   document.getElementById('flarecount').textContent=3;
@@ -2385,7 +2393,8 @@ navGamepadTick();
 // ---------- Skins Selection Screen ----------
 const ABILITY_DEFS = [
   { id:'shield_ability', name:'Shield Burst', desc:'On-demand 6s shield. Cooldown 20s.', costType:'coins', cost:400, keyLabel:'C', gpLabel:'RT', color:'#5ecbff' },
-  { id:'missilepanic_ability', name:'Missile Panic', desc:'On-demand 10s missile barrage — locks every enemy on screen. Cooldown 30s.', costType:'cash', cost:12, keyLabel:'ALT', gpLabel:'RB', color:'#ff3d5c' }
+  { id:'missilepanic_ability', name:'Missile Panic', desc:'On-demand 10s missile barrage — locks every enemy on screen. Cooldown 30s.', costType:'cash', cost:12, keyLabel:'ALT', gpLabel:'RB', color:'#ff3d5c' },
+  { id:'commsjam_ability', name:'Comms Jam', desc:'On-demand 20s enemy comms jam — missiles and drones turn on each other. Cooldown 50s.', costType:'coins', cost:450, keyLabel:'V', gpLabel:'LB', color:'#b388ff' }
 ];
  
 function openSkinsScreen(){
