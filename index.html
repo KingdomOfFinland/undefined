@@ -46,17 +46,17 @@
   }
   button:hover { background:#3cf; }
   .hidden { display:none !important; }
-  #lbList {
+  #lbList, #curLbList {
     list-style:none; width:100%; max-width:340px; text-align:left;
     font-size:13px; max-height:200px; overflow-y:auto;
   }
-  #lbList li {
+  #lbList li, #curLbList li {
     display:flex; justify-content:space-between; padding:4px 8px;
     border-bottom:1px solid #123;
   }
-  #lbList li:nth-child(1) { color:#ffd700; }
-  #lbList li:nth-child(2) { color:#c0c0c0; }
-  #lbList li:nth-child(3) { color:#cd7f32; }
+  #lbList li:nth-child(1), #curLbList li:nth-child(1) { color:#ffd700; }
+  #lbList li:nth-child(2), #curLbList li:nth-child(2) { color:#c0c0c0; }
+  #lbList li:nth-child(3), #curLbList li:nth-child(3) { color:#cd7f32; }
   #flagSection { width:100%; max-width:340px; margin-top:8px; }
   #flagList {
     list-style:none; width:100%; text-align:left; font-size:11px;
@@ -288,6 +288,36 @@
       return [];
     }
   };
+ 
+  // Currency leaderboard — one live record per player (overwritten as their totals change),
+  // unlike the score leaderboard which logs every run.
+  window.__submitCurrency = async function(name, coins, cash, nuggets){
+    try{
+      const key = normalizeName(name).toLowerCase();
+      if(!key) return false;
+      const now = Date.now();
+      await set(ref(db, 'currency/' + key), { name: name.slice(0,12), coins, cash, nuggets, ts: now });
+      return true;
+    } catch(e){
+      console.error('currency submit failed', e);
+      return false;
+    }
+  };
+ 
+  window.__fetchTopCurrency = async function(n=10){
+    try{
+      const curRef = ref(db, 'currency');
+      const snap = await get(curRef);
+      const rows = [];
+      snap.forEach(child => rows.push(child.val()));
+      // net worth ranking: cash is the rarest/most valuable, then coins, then nuggets
+      rows.sort((a,b)=> (b.cash*100 + b.coins + b.nuggets*0.5) - (a.cash*100 + a.coins + a.nuggets*0.5));
+      return rows.slice(0, n);
+    } catch(e){
+      console.error('fetch currency leaderboard failed', e);
+      return [];
+    }
+  };
 </script>
  
 </head>
@@ -323,6 +353,8 @@
     <button id="skinsBtnStart">SKINS</button>
     <h2 style="font-size:14px;color:#0ff;margin-top:10px;">TOP PILOTS</h2>
     <ul id="lbList"><li>Loading...</li></ul>
+    <h2 style="font-size:14px;color:#ffd23d;margin-top:10px;">RICHEST PILOTS 🪙💵🐔</h2>
+    <ul id="curLbList"><li>Loading...</li></ul>
     <div id="flagSection" style="display:none;">
       <h2 style="font-size:12px;color:#f66;">🚩 FLAGGED</h2>
       <ul id="flagList"></ul>
@@ -2159,6 +2191,26 @@ function renderLeaderboard(rows){
   el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>${r.score} (wv${r.wave})</span></li>`).join('');
 }
  
+function renderCurrencyLeaderboard(rows){
+  const el = document.getElementById('curLbList');
+  if(!el) return;
+  if(!rows.length){ el.innerHTML = '<li>No pilots yet — be the first</li>'; return; }
+  el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>🪙${r.coins||0} 💵${r.cash||0} 🐔${r.nuggets||0}</span></li>`).join('');
+}
+ 
+async function loadCurrencyLeaderboard(){
+  if(!window.__fetchTopCurrency){ setTimeout(loadCurrencyLeaderboard, 300); return; }
+  const rows = await window.__fetchTopCurrency(10);
+  renderCurrencyLeaderboard(rows);
+}
+ 
+function syncCurrencyToServer(){
+  const name = getUsername();
+  if(!name || !window.__submitCurrency) return;
+  window.__submitCurrency(name, getCoins(), getCash(), getNuggets());
+}
+ 
+ 
 function renderFlagged(rows){
   const el = document.getElementById('flagList');
   if(!el) return;
@@ -2183,6 +2235,7 @@ async function loadLeaderboard(){
 function gameOver(){
   running = false;
   SFX.gameOver();
+  syncCurrencyToServer();
   const center = document.getElementById('center');
   center.classList.remove('hidden');
   const savedName = getUsername() || 'PILOT';
@@ -2207,12 +2260,15 @@ function gameOver(){
     <button id="skinsBtnGO">SKINS</button>
     <h2 style="font-size:14px;color:#0ff;margin-top:6px;">TOP PILOTS</h2>
     <ul id="lbList"><li>Loading...</li></ul>
+    <h2 style="font-size:14px;color:#ffd23d;margin-top:6px;">RICHEST PILOTS 🪙💵🐔</h2>
+    <ul id="curLbList"><li>Loading...</li></ul>
     <div id="flagSection" style="display:none;">
       <h2 style="font-size:12px;color:#f66;">🚩 FLAGGED</h2>
       <ul id="flagList"></ul>
     </div>
   `;
   loadLeaderboard();
+  loadCurrencyLeaderboard();
   loadFlagged();
   document.getElementById('restartBtn').onclick = () => { SFX.uiClick(); resetGame(); };
   document.getElementById('skinsBtnGO').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
@@ -2267,6 +2323,7 @@ function gameOver(){
 function loop(){
   if(!running) return;
   frame++;
+  if(frame % 600 === 0) syncCurrencyToServer(); // stay "live" during long runs too
  
   if(dyingTimer>0){
     dyingTimer--;
@@ -2336,8 +2393,14 @@ if(muteBtnEl){
   };
 }
 loadLeaderboard();
+loadCurrencyLeaderboard();
 loadFlagged();
 updateCurrencyHud();
+syncCurrencyToServer();
+setInterval(() => {
+  syncCurrencyToServer();
+  loadCurrencyLeaderboard();
+}, 8000);
  
 // ---------- Dev / Admin Mode ----------
 window.addEventListener('keydown', (e) => {
@@ -2647,6 +2710,7 @@ function openSkinsScreen(){
     overlay.querySelector('#hangarCoins').textContent = getCoins();
     overlay.querySelector('#hangarCash').textContent = getCash();
     overlay.querySelector('#hangarNuggets').textContent = getNuggets();
+    syncCurrencyToServer();
   }
   renderCurrency();
   overlay.querySelector('#convertBtn').onclick = () => {
