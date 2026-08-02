@@ -721,6 +721,24 @@ const SHIP_SKINS = [
     ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#6bff8f'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
     drawThruster(ctx,th,'rgba(107,255,143,0.85)');
+  }},
+  { id:'nugget_wing', name:'Nugget Wing', unlock:{type:'nuggets', value:80}, draw(ctx,th){
+    ctx.fillStyle='#d9a441'; ctx.strokeStyle='#ffe066'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffe066'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(217,164,65,0.85)');
+  }},
+  { id:'aurora', name:'Aurora Wing', unlock:{type:'score', value:30000}, draw(ctx,th){
+    ctx.fillStyle='#2a1a4a'; ctx.strokeStyle='#7fffd4'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#7fffd4'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(127,255,212,0.85)');
   }}
 ];
  
@@ -732,7 +750,9 @@ const BULLET_SKINS = [
   { id:'gold', name:'Golden Rounds', unlock:{type:'score', value:12000}, color:'#ffd700' },
   { id:'crimson_bullet', name:'Crimson Rounds', unlock:{type:'wave', value:16}, color:'#ff3355' },
   { id:'coin_bullet', name:'Bounty Rounds', unlock:{type:'coins', value:150}, color:'#ffae00' },
-  { id:'cash_bullet', name:'Reaper Rounds', unlock:{type:'cash', value:6}, color:'#6bff8f' }
+  { id:'cash_bullet', name:'Reaper Rounds', unlock:{type:'cash', value:6}, color:'#6bff8f' },
+  { id:'nugget_bullet', name:'Nugget Rounds', unlock:{type:'nuggets', value:40}, color:'#d9a441' },
+  { id:'aurora_bullet', name:'Aurora Rounds', unlock:{type:'score', value:16000}, color:'#7fffd4' }
 ];
  
 const MISSILE_SKINS = [
@@ -743,7 +763,9 @@ const MISSILE_SKINS = [
   { id:'radiant', name:'Radiant', unlock:{type:'score', value:25000}, color:'#ffee00' },
   { id:'venom', name:'Venom', unlock:{type:'kills', value:700}, color:'#33ff88' },
   { id:'coin_missile', name:'Bounty Seeker', unlock:{type:'coins', value:200}, color:'#ffd23d' },
-  { id:'cash_missile', name:'Reaper Seeker', unlock:{type:'cash', value:8}, color:'#ff3d5c' }
+  { id:'cash_missile', name:'Reaper Seeker', unlock:{type:'cash', value:8}, color:'#ff3d5c' },
+  { id:'nugget_missile', name:'Nugget Seeker', unlock:{type:'nuggets', value:50}, color:'#d9a441' },
+  { id:'aurora_missile', name:'Aurora Seeker', unlock:{type:'wave', value:22}, color:'#7fffd4' }
 ];
  
 const FLARE_SKINS = [
@@ -752,7 +774,9 @@ const FLARE_SKINS = [
   { id:'royal', name:'Royal', unlock:{type:'kills', value:250}, color:'180,80,255' },
   { id:'inferno_flare', name:'Inferno', unlock:{type:'score', value:18000}, color:'255,60,60' },
   { id:'coin_flare', name:'Bounty Flare', unlock:{type:'coins', value:120}, color:'255,215,0' },
-  { id:'cash_flare', name:'Reaper Flare', unlock:{type:'cash', value:5}, color:'107,255,143' }
+  { id:'cash_flare', name:'Reaper Flare', unlock:{type:'cash', value:5}, color:'107,255,143' },
+  { id:'nugget_flare', name:'Nugget Flare', unlock:{type:'nuggets', value:30}, color:'217,164,65' },
+  { id:'aurora_flare', name:'Aurora Flare', unlock:{type:'kills', value:800}, color:'127,255,212' }
 ];
  
 // ---------- Enemy Skins ----------
@@ -859,6 +883,11 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#6b5a2a'; ctx.strokeStyle='#ffd700';
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'nugget_cruiser', name:'Nugget Cruiser', unlock:{type:'nuggets', value:120}, draw(ctx,e){
+      ctx.fillStyle='#d9a441'; ctx.strokeStyle='#ffe066';
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ffe066'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
     }}
   ],
   carrier: [
@@ -909,6 +938,14 @@ const ENEMY_SKINS = {
       ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
       ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#6bff8f'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'nugget_carrier', name:'Nugget Carrier', unlock:{type:'nuggets', value:100}, draw(ctx,e){
+      ctx.fillStyle='#d9a441'; ctx.strokeStyle='#ffe066';
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,0); ctx.lineTo(-e.w/2+14,-e.h/2); ctx.lineTo(e.w/2-14,-e.h/2);
+      ctx.lineTo(e.w/2,0); ctx.lineTo(e.w/2-14,e.h/2); ctx.lineTo(-e.w/2+14,e.h/2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#ffe066'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill();
     }}
   ],
   drone: [
@@ -974,7 +1011,7 @@ function isSkinUnlocked(skin, stats){
   if(skin.unlock.type === 'score') return stats.bestScore >= skin.unlock.value;
   if(skin.unlock.type === 'wave') return stats.bestWave >= skin.unlock.value;
   if(skin.unlock.type === 'kills') return stats.totalKills >= skin.unlock.value;
-  if(skin.unlock.type === 'coins' || skin.unlock.type === 'cash') return getOwnedSkins().includes(skin.id);
+  if(skin.unlock.type === 'coins' || skin.unlock.type === 'cash' || skin.unlock.type === 'nuggets') return getOwnedSkins().includes(skin.id);
   return false;
 }
  
@@ -985,6 +1022,7 @@ function unlockRequirementText(skin){
   if(skin.unlock.type === 'kills') return `${skin.unlock.value} total kills`;
   if(skin.unlock.type === 'coins') return `${skin.unlock.value} coins — buy in Shop`;
   if(skin.unlock.type === 'cash') return `${skin.unlock.value} cash — buy in Shop`;
+  if(skin.unlock.type === 'nuggets') return `${skin.unlock.value} nuggets — buy in Shop`;
   return '';
 }
  
@@ -1004,6 +1042,20 @@ function convertCoinsToCash(){
   if(getCoins() < COIN_TO_CASH_RATE) return false;
   spendCoins(COIN_TO_CASH_RATE);
   addCash(1);
+  return true;
+}
+ 
+function getNuggets(){ return parseInt(localStorage.getItem('uf_nuggets')||'0',10) || 0; }
+function setNuggets(n){ localStorage.setItem('uf_nuggets', String(Math.max(0,Math.floor(n)))); }
+function addNuggets(n){ setNuggets(getNuggets()+n); updateCurrencyHud(); }
+function spendNuggets(n){ if(getNuggets()<n) return false; setNuggets(getNuggets()-n); updateCurrencyHud(); return true; }
+ 
+const NUGGETS_PER_COIN = 2; // 1 coin = 2 nuggets
+function convertCoinsToNuggets(){
+  const coins = getCoins();
+  if(coins <= 0) return false;
+  spendCoins(coins);
+  addNuggets(coins * NUGGETS_PER_COIN);
   return true;
 }
  
@@ -2575,10 +2627,12 @@ function openSkinsScreen(){
  
   overlay.innerHTML = `
     <h1 style="font-size:22px;color:#0ff;text-shadow:0 0 10px #0ff;">HANGAR</h1>
-    <div style="display:flex; align-items:center; justify-content:center; gap:14px; font-size:13px; margin-bottom:6px;">
+    <div style="display:flex; align-items:center; justify-content:center; gap:14px; font-size:13px; margin-bottom:6px; flex-wrap:wrap;">
       <span>🪙 <span id="hangarCoins">0</span></span>
       <span>💵 <span id="hangarCash">0</span></span>
+      <span>🐔 <span id="hangarNuggets">0</span></span>
       <button id="convertBtn" style="font-size:11px; padding:4px 8px;">CONVERT 100 🪙 → 1 💵</button>
+      <button id="convertNuggetsBtn" style="font-size:11px; padding:4px 8px;">CONVERT 🪙 → 🐔 x2</button>
     </div>
     <div class="skinTabs" id="skinTabs"></div>
     <div id="skinsGrid"></div>
@@ -2592,10 +2646,15 @@ function openSkinsScreen(){
   function renderCurrency(){
     overlay.querySelector('#hangarCoins').textContent = getCoins();
     overlay.querySelector('#hangarCash').textContent = getCash();
+    overlay.querySelector('#hangarNuggets').textContent = getNuggets();
   }
   renderCurrency();
   overlay.querySelector('#convertBtn').onclick = () => {
     if(convertCoinsToCash()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
+    renderCurrency();
+  };
+  overlay.querySelector('#convertNuggetsBtn').onclick = () => {
+    if(convertCoinsToNuggets()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
     renderCurrency();
   };
  
@@ -2723,17 +2782,20 @@ function openSkinsScreen(){
       } else if(!unlocked){
         const req = document.createElement('div');
         req.className = 'skinReq';
-        const buyable = skin.unlock.type==='coins' || skin.unlock.type==='cash';
+        const buyable = skin.unlock.type==='coins' || skin.unlock.type==='cash' || skin.unlock.type==='nuggets';
+        const icon = skin.unlock.type==='coins' ? '🪙' : skin.unlock.type==='cash' ? '💵' : '🐔';
         req.textContent = buyable
-          ? `${skin.unlock.type==='coins' ? '🪙' : '💵'} ${skin.unlock.value} — TAP TO BUY`
+          ? `${icon} ${skin.unlock.value} — TAP TO BUY`
           : ('🔒 ' + unlockRequirementText(skin));
         card.appendChild(req);
       }
  
       card.onclick = () => {
         if(!unlocked){
-          if(skin.unlock.type==='coins' || skin.unlock.type==='cash'){
-            const ok = skin.unlock.type==='coins' ? spendCoins(skin.unlock.value) : spendCash(skin.unlock.value);
+          if(skin.unlock.type==='coins' || skin.unlock.type==='cash' || skin.unlock.type==='nuggets'){
+            const ok = skin.unlock.type==='coins' ? spendCoins(skin.unlock.value)
+                     : skin.unlock.type==='cash' ? spendCash(skin.unlock.value)
+                     : spendNuggets(skin.unlock.value);
             if(ok){
               ownSkin(skin.id);
               SFX.powerupPickup();
