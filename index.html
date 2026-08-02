@@ -3106,6 +3106,98 @@ document.addEventListener('DOMContentLoaded', () => {
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
 }
+
+const BLACK_MARKET_ITEMS = [
+  {
+    id:"glitch_chip",
+    name:"Glitch Chip",
+    desc:"a corrupted tournament upgrade. nobody knows what it does.",
+    cost:1500,
+    costType:"coins",
+    color:"#00ffff"
+  },
+
+  {
+    id:"void_core",
+    name:"Void Core",
+    desc:"an unstable power source from somewhere... else.",
+    cost:5000,
+    costType:"coins",
+    color:"#8a00ff"
+  },
+
+  {
+    id:"prototype_engine",
+    name:"Prototype Engine",
+    desc:"experimental tech. warranty expired 3 years ago.",
+    cost:7500,
+    costType:"coins",
+    color:"#ff6600"
+  },
+
+  {
+    id:"black_market_skin",
+    name:"Shadow Paint",
+    desc:"a suspiciously dark coating for your ship.",
+    cost:2500,
+    costType:"coins",
+    color:"#111111"
+  },
+
+  {
+    id:"hacker_trail",
+    name:"Code Trail",
+    desc:"leaves a trail of floating corrupted code.",
+    cost:3000,
+    costType:"coins",
+    color:"#00ff66"
+  },
+
+  {
+    id:"illegal_booster",
+    name:"Overclock Juice",
+    desc:"makes things faster. probably too fast.",
+    cost:4000,
+    costType:"coins",
+    color:"#ff0033"
+  },
+
+  {
+    id:"ancient_floppy",
+    name:"Ancient Floppy",
+    desc:"contains mysterious fighter data from 1997.",
+    cost:1997,
+    costType:"coins",
+    color:"#cccccc"
+  },
+
+  {
+    id:"dev_console",
+    name:"Broken Dev Console",
+    desc:"it was never meant to leave the developer room.",
+    cost:10000,
+    costType:"coins",
+    color:"#ffff00"
+  },
+
+  {
+    id:"forbidden_texture",
+    name:"Forbidden Texture",
+    desc:"the shopkeeper refuses to explain this one.",
+    cost:6666,
+    costType:"coins",
+    color:"#ff00ff"
+  },
+
+  {
+    id:"mystery_box",
+    name:"Mystery Box",
+    desc:"could be amazing. could be absolutely useless.",
+    cost:1000,
+    costType:"coins",
+    color:"#ffffff"
+  }
+];
  
 </script>
 </body>
