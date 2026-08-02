@@ -2753,7 +2753,76 @@ function openSkinsScreen(){
     const stats = getStats();
     const equipped = getEquippedSkins();
     const cat = categories.find(c => c.key===activeCat);
- 
+
+   if(cat.black_market){
+  BLACK_MARKET_ITEMS.forEach(item => {
+    const owned = hasItem(item.id);
+
+    const card = document.createElement('div');
+    card.className = 'skinCard' + (owned ? ' equipped' : '');
+    card.style.padding = '10px';
+
+    const icon = document.createElement('div');
+    icon.style.cssText = `
+      width:48px;
+      height:48px;
+      margin:0 auto 6px;
+      border-radius:50%;
+      background:${item.color};
+      box-shadow:0 0 12px ${item.color};
+    `;
+    card.appendChild(icon);
+
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'skinName';
+    nameEl.textContent = item.name;
+    card.appendChild(nameEl);
+
+
+    const descEl = document.createElement('div');
+    descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+    descEl.textContent = item.desc;
+    card.appendChild(descEl);
+
+
+    if(owned){
+      const tag = document.createElement('div');
+      tag.className = 'skinEquippedTag';
+      tag.textContent = 'OWNED';
+      card.appendChild(tag);
+
+    } else {
+
+      const req = document.createElement('div');
+      req.className = 'skinReq';
+      req.textContent =
+        `${item.costType==='coins' ? '🪙' : '💵'} ${item.cost} — TAP TO BUY`;
+
+      req.onclick = () => {
+        if(item.costType === 'coins' && coins >= item.cost){
+
+          coins -= item.cost;
+          saveCurrency();
+
+          addItem(item.id);
+
+          card.classList.add('equipped');
+          req.textContent = 'OWNED';
+
+        } else {
+          req.textContent = 'NOT ENOUGH MONEY';
+        }
+      };
+
+      card.appendChild(req);
+    }
+
+
+    container.appendChild(card);
+  });
+}
+   
     if(cat.abilities){
       ABILITY_DEFS.forEach(ab => {
         const owned = hasAbility(ab.id);
