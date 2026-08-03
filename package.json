@@ -1,0 +1,11 @@
+{
+  "name": "blackmarket-rotation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "rotate": "node rotate-blackmarket.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}
