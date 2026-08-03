@@ -318,6 +318,22 @@
       return [];
     }
   };
+ 
+  // Black Market stock — an object like { crate_scrap:true, ability_shield_ability:true, ... }
+  // at db path blackmarket/stock. Returns null if the node doesn't exist yet (caller falls
+  // back to a sane default so the tab isn't empty on a fresh deploy) or on any fetch error.
+  // Update it live from the browser console (after window.__adminSignIn()) with:
+  //   window.__adminUpdateEntry('blackmarket/stock', { crate_scrap:true, crate_nuggets:false })
+  window.__fetchBlackMarketStock = async function(){
+    try{
+      const snap = await get(ref(db, 'blackmarket/stock'));
+      if(!snap.exists()) return null;
+      return snap.val();
+    } catch(e){
+      console.error('fetch black market stock failed', e);
+      return null;
+    }
+  };
 </script>
  
 </head>
@@ -2731,6 +2747,108 @@ const ABILITY_DEFS = [
   { id:'backup_ability', name:'Call Backup', desc:'Calls in 4 fighter escorts (75 HP each). Usable again once your squad is wiped.', costType:'cash', cost:20, keyLabel:'B', gpLabel:'LT', color:'#4ecdc4' }
 ];
  
+// ---------- Black Market ----------
+// Which crates/items are currently for sale is controlled LIVE via Firebase at
+// blackmarket/stock — an object of { itemId: true }. Crate ids are their own id
+// (e.g. "crate_scrap"); featured abilities are namespaced "ability_<id>". If that
+// db node doesn't exist yet, everything in BLACKMARKET_DEFAULT_STOCK_IDS shows by
+// default so the tab isn't empty on a fresh deploy. To update stock live from the
+// console: window.__adminSignIn() then
+//   window.__adminUpdateEntry('blackmarket/stock', { crate_nuggets:false })
+const BLACKMARKET_DEFAULT_STOCK_IDS = [
+  'crate_scrap','crate_contraband','crate_nuggets',
+  'ability_shield_ability','ability_missilepanic_ability','ability_commsjam_ability','ability_backup_ability'
+];
+ 
+const BLACKMARKET_CRATES = [
+  {
+    id:'crate_scrap', name:'Scrap Crate', costType:'coins', cost:150, color:'#8a8a8a',
+    desc:'Cheap salvage. Mostly coins, occasionally more.',
+    rewards:[
+      { weight:40, type:'coins', min:50, max:150 },
+      { weight:20, type:'cash', min:1, max:3 },
+      { weight:15, type:'nuggets', min:1, max:2 },
+      { weight:20, type:'dud', label:'Nothing but static' },
+      { weight:5,  type:'ability' }
+    ]
+  },
+  {
+    id:'crate_contraband', name:'Contraband Crate', costType:'cash', cost:15, color:'#ff6b6b',
+    desc:'Off-the-books gear. Better odds, steeper price.',
+    rewards:[
+      { weight:25, type:'coins', min:200, max:500 },
+      { weight:30, type:'cash', min:5, max:15 },
+      { weight:20, type:'nuggets', min:2, max:5 },
+      { weight:15, type:'ability' },
+      { weight:8,  type:'skin' },
+      { weight:2,  type:'dud', label:'Confiscated — nothing' }
+    ]
+  },
+  {
+    id:'crate_nuggets', name:"Smuggler's Crate", costType:'nuggets', cost:8, color:'#ffd23d',
+    desc:'Paid in nuggets, no questions asked. Best odds.',
+    rewards:[
+      { weight:20, type:'coins', min:400, max:900 },
+      { weight:20, type:'cash', min:10, max:25 },
+      { weight:25, type:'ability' },
+      { weight:25, type:'skin' },
+      { weight:10, type:'dud', label:'Nothing this time' }
+    ]
+  }
+];
+ 
+// Only skins bought with currency are eligible jackpot pulls — stat-gated skins
+// (score/wave/kills) are earned, not sold, so a crate shouldn't hand them out.
+function blackMarketBuyableSkinPool(){
+  const all = [...SHIP_SKINS, ...BULLET_SKINS, ...MISSILE_SKINS, ...FLARE_SKINS, ...Object.values(ENEMY_SKINS).flat()];
+  const owned = getOwnedSkins();
+  return all.filter(s => (s.unlock.type==='coins'||s.unlock.type==='cash'||s.unlock.type==='nuggets') && !owned.includes(s.id));
+}
+ 
+function rollCrateReward(crate){
+  const total = crate.rewards.reduce((s,r)=>s+r.weight,0);
+  let r = Math.random()*total;
+  for(const rew of crate.rewards){
+    if(r < rew.weight) return rew;
+    r -= rew.weight;
+  }
+  return crate.rewards[crate.rewards.length-1];
+}
+ 
+// Applies a rolled reward to the player's account and returns a short display string.
+function applyCrateReward(rew){
+  if(rew.type === 'coins'){
+    const amt = Math.round(rand(rew.min, rew.max));
+    addCoins(amt);
+    return `+${amt} 🪙`;
+  }
+  if(rew.type === 'cash'){
+    const amt = Math.round(rand(rew.min, rew.max));
+    addCash(amt);
+    return `+${amt} 💵`;
+  }
+  if(rew.type === 'nuggets'){
+    const amt = Math.round(rand(rew.min, rew.max));
+    addNuggets(amt);
+    return `+${amt} 🐔`;
+  }
+  if(rew.type === 'ability'){
+    const locked = ABILITY_DEFS.filter(a => !hasAbility(a.id));
+    if(!locked.length){ addCoins(300); return 'All abilities owned — +300 🪙 instead'; }
+    const pick = locked[Math.floor(Math.random()*locked.length)];
+    ownAbility(pick.id);
+    return `Unlocked ability: ${pick.name}`;
+  }
+  if(rew.type === 'skin'){
+    const pool = blackMarketBuyableSkinPool();
+    if(!pool.length){ addCoins(300); return 'All skins owned — +300 🪙 instead'; }
+    const pick = pool[Math.floor(Math.random()*pool.length)];
+    ownSkin(pick.id);
+    return `Unlocked skin: ${pick.name}`;
+  }
+  return rew.label || 'Nothing this time';
+}
+ 
 function openSkinsScreen(){
   const wrap = document.getElementById('wrap');
   const overlay = document.createElement('div');
@@ -2738,6 +2856,7 @@ function openSkinsScreen(){
  
   const categories = [
     { key:'abilities', label:'ABILITIES', abilities:true },
+    { key:'blackmarket', label:'BLACK MARKET', blackmarket:true },
     { key:'ship', label:'SHIP', list:SHIP_SKINS },
     { key:'bullet', label:'BULLETS', list:BULLET_SKINS },
     { key:'missile', label:'MISSILES', list:MISSILE_SKINS },
@@ -2750,6 +2869,22 @@ function openSkinsScreen(){
     { key:'enemy_drone', label:'DRONE', list:ENEMY_SKINS.drone, enemyType:'drone' }
   ];
   let activeCat = 'abilities';
+ 
+  // Black market stock is fetched once per Hangar visit. null = still loading;
+  // {} with keys missing = that item isn't in stock right now.
+  let marketStock = null;
+  async function loadMarketStock(){
+    let remote = null;
+    if(window.__fetchBlackMarketStock) remote = await window.__fetchBlackMarketStock();
+    if(remote === null){
+      marketStock = {};
+      BLACKMARKET_DEFAULT_STOCK_IDS.forEach(id => marketStock[id] = true);
+    } else {
+      marketStock = remote;
+    }
+    if(activeCat === 'blackmarket') renderGrid();
+  }
+  loadMarketStock();
  
   overlay.innerHTML = `
     <h1 style="font-size:22px;color:#0ff;text-shadow:0 0 10px #0ff;">HANGAR</h1>
@@ -2784,6 +2919,22 @@ function openSkinsScreen(){
     if(convertCoinsToNuggets()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
     renderCurrency();
   };
+ 
+  function showCrateResult(crate, resultText){
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,5,10,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:100;';
+    modal.innerHTML = `
+      <div style="font-size:13px;color:#8cf;">${crate.name} opened...</div>
+      <div style="font-size:20px;color:#0ff;text-shadow:0 0 12px #0ff;text-align:center;max-width:280px;">${resultText}</div>
+      <button id="crateResultOk">OK</button>
+    `;
+    wrap.appendChild(modal);
+    modal.querySelector('#crateResultOk').onclick = () => {
+      SFX.uiClick();
+      wrap.removeChild(modal);
+      renderGrid();
+    };
+  }
  
   function renderTabs(){
     tabsEl.innerHTML = '';
@@ -2850,6 +3001,115 @@ function openSkinsScreen(){
  
         gridEl.appendChild(card);
       });
+      return;
+    }
+ 
+    if(cat.blackmarket){
+      if(marketStock === null){
+        const loading = document.createElement('div');
+        loading.style.cssText = 'grid-column:1/-1;text-align:center;color:#8cf;font-size:12px;padding:20px;';
+        loading.textContent = 'Checking the market...';
+        gridEl.appendChild(loading);
+        return;
+      }
+ 
+      const inStock = id => marketStock[id] === true;
+ 
+      BLACKMARKET_CRATES.filter(c => inStock(c.id)).forEach(crate => {
+        const card = document.createElement('div');
+        card.className = 'skinCard';
+        card.style.padding = '10px';
+ 
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;background:${crate.color};box-shadow:0 0 12px ${crate.color};clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);`;
+        card.appendChild(icon);
+ 
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = crate.name;
+        card.appendChild(nameEl);
+ 
+        const descEl = document.createElement('div');
+        descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+        descEl.textContent = crate.desc;
+        card.appendChild(descEl);
+ 
+        const costIcon = crate.costType==='coins' ? '🪙' : crate.costType==='cash' ? '💵' : '🐔';
+        const req = document.createElement('div');
+        req.className = 'skinReq';
+        req.style.color = '#ffd23d';
+        req.textContent = `${costIcon} ${crate.cost} — OPEN`;
+        card.appendChild(req);
+ 
+        card.onclick = () => {
+          const ok = crate.costType==='coins' ? spendCoins(crate.cost)
+                   : crate.costType==='cash' ? spendCash(crate.cost)
+                   : spendNuggets(crate.cost);
+          if(!ok){ SFX.shieldBlock(); return; }
+          const rew = rollCrateReward(crate);
+          const resultText = applyCrateReward(rew);
+          SFX.powerupPickup();
+          renderCurrency();
+          showCrateResult(crate, resultText);
+        };
+ 
+        gridEl.appendChild(card);
+      });
+ 
+      ABILITY_DEFS.filter(ab => inStock('ability_' + ab.id)).forEach(ab => {
+        const owned = hasAbility(ab.id);
+        const card = document.createElement('div');
+        card.className = 'skinCard' + (owned ? ' equipped' : '');
+        card.style.padding = '10px';
+ 
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;border-radius:50%;background:${ab.color};box-shadow:0 0 12px ${ab.color};`;
+        card.appendChild(icon);
+ 
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = `${ab.name} [${ab.keyLabel} / ${ab.gpLabel}]`;
+        card.appendChild(nameEl);
+ 
+        const descEl = document.createElement('div');
+        descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+        descEl.textContent = ab.desc;
+        card.appendChild(descEl);
+ 
+        if(owned){
+          const tag = document.createElement('div');
+          tag.className = 'skinEquippedTag';
+          tag.textContent = 'OWNED';
+          card.appendChild(tag);
+        } else {
+          const req = document.createElement('div');
+          req.className = 'skinReq';
+          req.textContent = `${ab.costType==='coins' ? '🪙' : '💵'} ${ab.cost} — TAP TO BUY`;
+          card.appendChild(req);
+        }
+ 
+        card.onclick = () => {
+          if(owned) return;
+          const ok = ab.costType==='coins' ? spendCoins(ab.cost) : spendCash(ab.cost);
+          if(ok){
+            ownAbility(ab.id);
+            SFX.powerupPickup();
+            renderCurrency();
+            renderGrid();
+          } else {
+            SFX.shieldBlock();
+          }
+        };
+ 
+        gridEl.appendChild(card);
+      });
+ 
+      if(!gridEl.children.length){
+        const empty = document.createElement('div');
+        empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#666;font-size:12px;padding:20px;';
+        empty.textContent = 'The market is empty right now — check back later.';
+        gridEl.appendChild(empty);
+      }
       return;
     }
  
