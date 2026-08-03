@@ -319,14 +319,14 @@
     }
   };
  
-  // Black Market stock — an object like { crate_scrap:true, ability_shield_ability:true, ... }
-  // at db path blackmarket/stock. Returns null if the node doesn't exist yet (caller falls
-  // back to a sane default so the tab isn't empty on a fresh deploy) or on any fetch error.
-  // Update it live from the browser console (after window.__adminSignIn()) with:
-  //   window.__adminUpdateEntry('blackmarket/stock', { crate_scrap:true, crate_nuggets:false })
+  // Black Market stock lives at db path blackMarket/items — an object keyed by item
+  // id, e.g. { crate_scrap: {name,price,type}, ability_shield_ability: {...} }.
+  // We only care whether a key is PRESENT (in stock) — price/name/type are ignored
+  // client-side; cost stays fixed in the game code. Returns null if the node doesn't
+  // exist yet or on any fetch error (caller falls back to a default stock list).
   window.__fetchBlackMarketStock = async function(){
     try{
-      const snap = await get(ref(db, 'blackmarket/stock'));
+      const snap = await get(ref(db, 'blackMarket/items'));
       if(!snap.exists()) return null;
       return snap.val();
     } catch(e){
@@ -2749,12 +2749,20 @@ const ABILITY_DEFS = [
  
 // ---------- Black Market ----------
 // Which crates/items are currently for sale is controlled LIVE via Firebase at
-// blackmarket/stock — an object of { itemId: true }. Crate ids are their own id
-// (e.g. "crate_scrap"); featured abilities are namespaced "ability_<id>". If that
-// db node doesn't exist yet, everything in BLACKMARKET_DEFAULT_STOCK_IDS shows by
-// default so the tab isn't empty on a fresh deploy. To update stock live from the
-// console: window.__adminSignIn() then
-//   window.__adminUpdateEntry('blackmarket/stock', { crate_nuggets:false })
+// blackMarket/items — an object of { itemId: {name, price, type} } (per your db
+// rules). Crate ids are their own id (e.g. "crate_scrap"); featured abilities are
+// namespaced "ability_<id>". We only check whether a key is PRESENT — price/name/
+// type in that record are informational for whatever process writes it (yours
+// refreshes it every ~12h) and aren't used client-side; cost stays fixed below.
+// If the node doesn't exist yet, BLACKMARKET_DEFAULT_STOCK_IDS shows by default
+// so the tab isn't empty. Manual override from the console (after
+// window.__adminSignIn()):
+//   window.__adminUpdateEntry('blackMarket', {
+//     date: Date.now(),
+//     items: { crate_scrap: {name:'Scrap Crate', price:150, type:'crate'} }
+//   });
+// Note: that replaces the whole items list, so include every id that should stay
+// in stock, not just the one you're changing.
 const BLACKMARKET_DEFAULT_STOCK_IDS = [
   'crate_scrap','crate_contraband','crate_nuggets',
   'ability_shield_ability','ability_missilepanic_ability','ability_commsjam_ability','ability_backup_ability'
@@ -2878,7 +2886,7 @@ function openSkinsScreen(){
     if(window.__fetchBlackMarketStock) remote = await window.__fetchBlackMarketStock();
     if(remote === null){
       marketStock = {};
-      BLACKMARKET_DEFAULT_STOCK_IDS.forEach(id => marketStock[id] = true);
+      BLACKMARKET_DEFAULT_STOCK_IDS.forEach(id => marketStock[id] = {});
     } else {
       marketStock = remote;
     }
@@ -3013,7 +3021,7 @@ function openSkinsScreen(){
         return;
       }
  
-      const inStock = id => marketStock[id] === true;
+      const inStock = id => marketStock[id] !== undefined;
  
       BLACKMARKET_CRATES.filter(c => inStock(c.id)).forEach(crate => {
         const card = document.createElement('div');
