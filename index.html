@@ -1487,10 +1487,10 @@ function missilePanicFire(){
   if(player.missilePanicIdx >= alive.length) player.missilePanicIdx = 0;
   const target = alive[player.missilePanicIdx % alive.length];
   player.missilePanicIdx++;
-  missiles.push({
+  missiles.push(makeMissile({
     x:player.x, y:player.y-10, vx:0, vy:-4, side:'player',
     target, speed:7.5, turn:0.16, life:240, w:6,h:12
-  });
+  }, true));
   SFX.missileLaunch();
 }
  
@@ -1612,13 +1612,36 @@ function findLockTarget(){
   return best;
 }
  
+// ---------- Heat-seeking missiles ----------
+// A tougher missile variant: unaffected by the player's Comms Jam ability
+// (keeps its original target instead of getting confused), takes more than
+// one bullet hit to shoot down, and hits harder. Rolled per-launch — every
+// missile spawn point has a chance of producing one instead of a standard
+// missile.
+const HEATSEEK_ENEMY_CHANCE = 0.25;   // chance an enemy-fired missile is heat-seeking
+const HEATSEEK_PLAYER_CHANCE = 0.40;  // chance a player-fired missile is heat-seeking
+const HEATSEEK_DAMAGE_MULT = 1.05;    // 5% more damage than a standard missile
+const HEATSEEK_HP = 25;
+const HEATSEEK_BULLET_RESIST = 0.25;  // takes 25% less damage per bullet hit
+const PLAYER_BULLET_DAMAGE = 8;       // matches standard bullet damage vs enemies
+ 
+function makeMissile(base, isPlayerSide){
+  const chance = isPlayerSide ? HEATSEEK_PLAYER_CHANCE : HEATSEEK_ENEMY_CHANCE;
+  const heatseeking = Math.random() < chance;
+  if(heatseeking){
+    base.heatseeking = true;
+    base.hp = HEATSEEK_HP;
+  }
+  return base;
+}
+ 
 function fireMissile(){
   if(!player.lockTarget || !player.lockTarget.alive) return;
   SFX.missileLaunch();
-  missiles.push({
+  missiles.push(makeMissile({
     x:player.x, y:player.y-10, vx:0, vy:-4, side:'player',
     target: player.lockTarget, speed:6.5, turn:0.09, life:240, w:6,h:12
-  });
+  }, true));
   player.lockTarget = null;
   player.lockProgress = 0;
 }
@@ -1739,7 +1762,7 @@ function updateMissiles(){
     // retarget to nearby flare if player missile targeting... actually flares decoy ENEMY missiles
     if(m.side==='enemy'){
       let tgt;
-      if(player.commsJamT>0){
+      if(player.commsJamT>0 && !m.heatseeking){
         // comms jammed — lost lock on the player, mistakes another enemy as its target
         if(!m.jamTarget || !m.jamTarget.alive || frame % 45 === 0){
           const candidates = enemies.filter(en=>en.alive);
@@ -1841,7 +1864,7 @@ function updateEnemies(){
       if(e.missileCd<=0){
         e.missileCd = rand(200,320);
         SFX.missileLaunch();
-        missiles.push({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.2,turn:0.045,life:300,w:5,h:10,spawnGrace:15});
+        missiles.push(makeMissile({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.2,turn:0.045,life:300,w:5,h:10,spawnGrace:15}, false));
       }
     }
     else if(e.type==='bomber'){
@@ -1878,10 +1901,10 @@ function updateEnemies(){
         e.fireCd = rand(140,190);
         SFX.missileLaunch();
         for(let i=-1;i<=1;i++){
-          missiles.push({
+          missiles.push(makeMissile({
             x:e.x+i*20, y:e.y+12, vx:i*0.8, vy:3, side:'enemy',
             speed:4, turn:0.04, life:300, w:5,h:10, spawnGrace:15
-          });
+          }, false));
         }
       }
       e.launchCd--;
@@ -1980,15 +2003,27 @@ function updateCollisions(){
   }
   bullets = bullets.filter(b=>!b.dead);
  
-  // player bullets vs enemy missiles (bullets can shoot down incoming missiles)
+  // player bullets vs enemy missiles (bullets can shoot down incoming missiles —
+  // heat-seeking ones have their own HP pool and resist part of the damage)
   for(const b of bullets){
     for(const m of missiles){
       if(m.side!=='enemy' || m.dead) continue;
       if(circleHit(b,m,4,5)){
         b.dead = true;
-        m.dead = true;
-        spawnParticles(m.x,m.y,'#fc4',14,4);
-        SFX.explosionSmall();
+        if(m.heatseeking){
+          m.hp -= PLAYER_BULLET_DAMAGE * (1 - HEATSEEK_BULLET_RESIST);
+          spawnParticles(m.x,m.y,'#fc4',6,3);
+          SFX.hit();
+          if(m.hp <= 0){
+            m.dead = true;
+            spawnParticles(m.x,m.y,'#fc4',14,4);
+            SFX.explosionSmall();
+          }
+        } else {
+          m.dead = true;
+          spawnParticles(m.x,m.y,'#fc4',14,4);
+          SFX.explosionSmall();
+        }
         break;
       }
     }
@@ -2002,7 +2037,7 @@ function updateCollisions(){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(m,e,6,e.w/2)){
-        e.hp -= 45;
+        e.hp -= m.heatseeking ? 45 * HEATSEEK_DAMAGE_MULT : 45;
         m.dead = true;
         spawnParticles(m.x,m.y,'#8df',18,5);
         SFX.explosionSmall();
@@ -2039,7 +2074,7 @@ function updateCollisions(){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(m,e,6,e.w/2)){
-        e.hp -= 20;
+        e.hp -= m.heatseeking ? 20 * HEATSEEK_DAMAGE_MULT : 20;
         m.dead = true;
         spawnParticles(m.x,m.y,'#f83',16,4);
         SFX.explosionSmall();
@@ -2090,7 +2125,8 @@ function updateCollisions(){
     if(m.side!=='enemy') continue;
     if(circleHit(m,player,6,14)){
       m.dead=true;
-      if(damagePlayer(25)){
+      const dmg = m.heatseeking ? 25 * HEATSEEK_DAMAGE_MULT : 25;
+      if(damagePlayer(dmg)){
         shakeT=12;
         spawnParticles(player.x,player.y,'#f83',22,5);
         SFX.playerHit();
@@ -2194,6 +2230,10 @@ function drawMissiles(){
     ctx.save();
     ctx.translate(m.x,m.y);
     ctx.rotate(Math.atan2(m.vy,m.vx)+Math.PI/2);
+    if(m.heatseeking){
+      ctx.shadowColor = '#ff2fd6';
+      ctx.shadowBlur = 8 + Math.sin(frame*0.3)*3;
+    }
     ctx.fillStyle = m.side==='player' ? missileColor : '#f74';
     ctx.fillRect(-3,-8,6,16);
     ctx.restore();
