@@ -2754,19 +2754,16 @@ const ABILITY_DEFS = [
 // namespaced "ability_<id>". We only check whether a key is PRESENT — price/name/
 // type in that record are informational for whatever process writes it (yours
 // refreshes it every ~12h) and aren't used client-side; cost stays fixed below.
-// If the node doesn't exist yet, BLACKMARKET_DEFAULT_STOCK_IDS shows by default
-// so the tab isn't empty. Manual override from the console (after
+// If the node doesn't exist yet, blackMarketAllPossibleIds() below shows by
+// default so the tab isn't empty. Manual override from the console (after
 // window.__adminSignIn()):
 //   window.__adminUpdateEntry('blackMarket', {
 //     date: Date.now(),
 //     items: { crate_scrap: {name:'Scrap Crate', price:150, type:'crate'} }
 //   });
 // Note: that replaces the whole items list, so include every id that should stay
-// in stock, not just the one you're changing.
-const BLACKMARKET_DEFAULT_STOCK_IDS = [
-  'crate_scrap','crate_contraband','crate_nuggets',
-  'ability_shield_ability','ability_missilepanic_ability','ability_commsjam_ability','ability_backup_ability'
-];
+// in stock, not just the one you're changing. blackMarketAllPossibleIds() lists
+// every valid id — a rotation script should pick a subset of these each run.
  
 const BLACKMARKET_CRATES = [
   {
@@ -2802,8 +2799,53 @@ const BLACKMARKET_CRATES = [
       { weight:25, type:'skin' },
       { weight:10, type:'dud', label:'Nothing this time' }
     ]
+  },
+  {
+    id:'crate_rusty', name:'Rusty Crate', costType:'coins', cost:50, color:'#6b5a3a',
+    desc:'Bargain bin. You get what you pay for.',
+    rewards:[
+      { weight:55, type:'coins', min:10, max:60 },
+      { weight:10, type:'cash', min:1, max:2 },
+      { weight:35, type:'dud', label:'Empty — not even scrap' }
+    ]
+  },
+  {
+    id:'crate_jackpot', name:'Jackpot Crate', costType:'nuggets', cost:20, color:'#ff2fd6',
+    desc:'Top-shelf contraband. Always worth opening — no duds.',
+    rewards:[
+      { weight:35, type:'ability' },
+      { weight:35, type:'skin' },
+      { weight:20, type:'cash', min:20, max:50 },
+      { weight:10, type:'coins', min:800, max:1500 }
+    ]
   }
 ];
+ 
+// Skin lists grouped the same way the Hangar tabs are, so the black market can
+// pull "buy in shop"-type skins into its own listing without duplicating data.
+const BLACKMARKET_SKIN_CATEGORIES = [
+  { key:'ship', list:SHIP_SKINS },
+  { key:'bullet', list:BULLET_SKINS },
+  { key:'missile', list:MISSILE_SKINS },
+  { key:'flare', list:FLARE_SKINS },
+  { key:'enemy_ufo', list:ENEMY_SKINS.ufo, enemyType:'ufo' },
+  { key:'enemy_fighter', list:ENEMY_SKINS.fighter, enemyType:'fighter' },
+  { key:'enemy_bomber', list:ENEMY_SKINS.bomber, enemyType:'bomber' },
+  { key:'enemy_spaceship', list:ENEMY_SKINS.spaceship, enemyType:'spaceship' },
+  { key:'enemy_carrier', list:ENEMY_SKINS.carrier, enemyType:'carrier' },
+  { key:'enemy_drone', list:ENEMY_SKINS.drone, enemyType:'drone' }
+];
+function isBuyableSkin(s){ return s.unlock.type==='coins' || s.unlock.type==='cash' || s.unlock.type==='nuggets'; }
+ 
+function blackMarketAllPossibleIds(){
+  const ids = BLACKMARKET_CRATES.map(c => c.id);
+  ABILITY_DEFS.forEach(a => ids.push('ability_' + a.id));
+  BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list}) => {
+    list.filter(isBuyableSkin).forEach(s => ids.push('skin_' + key + '_' + s.id));
+  });
+  return ids;
+}
+ 
  
 // Only skins bought with currency are eligible jackpot pulls — stat-gated skins
 // (score/wave/kills) are earned, not sold, so a crate shouldn't hand them out.
@@ -2886,7 +2928,7 @@ function openSkinsScreen(){
     if(window.__fetchBlackMarketStock) remote = await window.__fetchBlackMarketStock();
     if(remote === null){
       marketStock = {};
-      BLACKMARKET_DEFAULT_STOCK_IDS.forEach(id => marketStock[id] = {});
+      blackMarketAllPossibleIds().forEach(id => marketStock[id] = {});
     } else {
       marketStock = remote;
     }
@@ -2927,6 +2969,101 @@ function openSkinsScreen(){
     if(convertCoinsToNuggets()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
     renderCurrency();
   };
+ 
+  // Builds one skin card — used both by the normal per-category tabs and by
+  // the Black Market's featured-skins listing, so the buy/equip/preview logic
+  // only lives in one place. catKey drives the preview drawing + equip slot;
+  // pass the skin's real category (e.g. 'ship'), not the active tab.
+  function buildSkinCard(skin, catKey, isEnemyCat, enemyType, stats, equipped){
+    const unlocked = isSkinUnlocked(skin, stats);
+    const isEquipped = isEnemyCat
+      ? getEquippedEnemySkin(enemyType) === skin.id
+      : equipped[catKey] === skin.id;
+ 
+    const card = document.createElement('div');
+    card.className = 'skinCard' + (isEquipped ? ' equipped' : '') + (!unlocked ? ' locked' : '');
+ 
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = 64; previewCanvas.height = 64;
+    const pctx = previewCanvas.getContext('2d');
+ 
+    if(isEnemyCat){
+      pctx.save();
+      pctx.translate(32,32);
+      const fakeEnemy = { w:36, h:24, diving:false };
+      skin.draw(pctx, fakeEnemy);
+      pctx.restore();
+    } else if(catKey === 'ship'){
+      pctx.save();
+      pctx.translate(32,36);
+      pctx.scale(1.1,1.1);
+      skin.draw(pctx, true);
+      pctx.restore();
+    } else if(catKey === 'bullet'){
+      pctx.fillStyle = skin.color;
+      pctx.fillRect(28,20,8,24);
+    } else if(catKey === 'missile'){
+      pctx.save();
+      pctx.translate(32,32);
+      pctx.fillStyle = skin.color;
+      pctx.fillRect(-4,-16,8,32);
+      pctx.restore();
+    } else if(catKey === 'flare'){
+      pctx.fillStyle = `rgba(${skin.color},1)`;
+      pctx.beginPath(); pctx.arc(32,32,14,0,Math.PI*2); pctx.fill();
+    }
+ 
+    const nameEl = document.createElement('div');
+    nameEl.className = 'skinName';
+    nameEl.textContent = skin.name;
+ 
+    card.appendChild(previewCanvas);
+    card.appendChild(nameEl);
+ 
+    if(isEquipped){
+      const tag = document.createElement('div');
+      tag.className = 'skinEquippedTag';
+      tag.textContent = 'EQUIPPED';
+      card.appendChild(tag);
+    } else if(!unlocked){
+      const req = document.createElement('div');
+      req.className = 'skinReq';
+      const buyable = isBuyableSkin(skin);
+      const icon = skin.unlock.type==='coins' ? '🪙' : skin.unlock.type==='cash' ? '💵' : '🐔';
+      req.textContent = buyable
+        ? `${icon} ${skin.unlock.value} — TAP TO BUY`
+        : ('🔒 ' + unlockRequirementText(skin));
+      card.appendChild(req);
+    }
+ 
+    card.onclick = () => {
+      if(!unlocked){
+        if(isBuyableSkin(skin)){
+          const ok = skin.unlock.type==='coins' ? spendCoins(skin.unlock.value)
+                   : skin.unlock.type==='cash' ? spendCash(skin.unlock.value)
+                   : spendNuggets(skin.unlock.value);
+          if(ok){
+            ownSkin(skin.id);
+            SFX.powerupPickup();
+            renderCurrency();
+            renderGrid();
+          } else {
+            SFX.shieldBlock();
+          }
+        }
+        return;
+      }
+      SFX.uiClick();
+      if(isEnemyCat){
+        setEquippedEnemySkin(enemyType, skin.id);
+      } else {
+        setEquippedSkin(catKey, skin.id);
+      }
+      renderGrid();
+    };
+ 
+    return card;
+  }
  
   function showCrateResult(crate, resultText){
     const modal = document.createElement('div');
@@ -3112,6 +3249,12 @@ function openSkinsScreen(){
         gridEl.appendChild(card);
       });
  
+      BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list, enemyType}) => {
+        list.filter(isBuyableSkin).filter(s => inStock('skin_' + key + '_' + s.id)).forEach(skin => {
+          gridEl.appendChild(buildSkinCard(skin, key, !!enemyType, enemyType, stats, equipped));
+        });
+      });
+ 
       if(!gridEl.children.length){
         const empty = document.createElement('div');
         empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#666;font-size:12px;padding:20px;';
@@ -3124,94 +3267,7 @@ function openSkinsScreen(){
     const isEnemyCat = !!cat.enemyType;
  
     cat.list.forEach(skin => {
-      const unlocked = isSkinUnlocked(skin, stats);
-      const isEquipped = isEnemyCat
-        ? getEquippedEnemySkin(cat.enemyType) === skin.id
-        : equipped[activeCat] === skin.id;
- 
-      const card = document.createElement('div');
-      card.className = 'skinCard' + (isEquipped ? ' equipped' : '') + (!unlocked ? ' locked' : '');
- 
-      const previewCanvas = document.createElement('canvas');
-      previewCanvas.width = 64; previewCanvas.height = 64;
-      const pctx = previewCanvas.getContext('2d');
- 
-      if(isEnemyCat){
-        pctx.save();
-        pctx.translate(32,32);
-        const fakeEnemy = { w:36, h:24, diving:false };
-        skin.draw(pctx, fakeEnemy);
-        pctx.restore();
-      } else if(activeCat === 'ship'){
-        pctx.save();
-        pctx.translate(32,36);
-        pctx.scale(1.1,1.1);
-        skin.draw(pctx, true);
-        pctx.restore();
-      } else if(activeCat === 'bullet'){
-        pctx.fillStyle = skin.color;
-        pctx.fillRect(28,20,8,24);
-      } else if(activeCat === 'missile'){
-        pctx.save();
-        pctx.translate(32,32);
-        pctx.fillStyle = skin.color;
-        pctx.fillRect(-4,-16,8,32);
-        pctx.restore();
-      } else if(activeCat === 'flare'){
-        pctx.fillStyle = `rgba(${skin.color},1)`;
-        pctx.beginPath(); pctx.arc(32,32,14,0,Math.PI*2); pctx.fill();
-      }
- 
-      const nameEl = document.createElement('div');
-      nameEl.className = 'skinName';
-      nameEl.textContent = skin.name;
- 
-      card.appendChild(previewCanvas);
-      card.appendChild(nameEl);
- 
-      if(isEquipped){
-        const tag = document.createElement('div');
-        tag.className = 'skinEquippedTag';
-        tag.textContent = 'EQUIPPED';
-        card.appendChild(tag);
-      } else if(!unlocked){
-        const req = document.createElement('div');
-        req.className = 'skinReq';
-        const buyable = skin.unlock.type==='coins' || skin.unlock.type==='cash' || skin.unlock.type==='nuggets';
-        const icon = skin.unlock.type==='coins' ? '🪙' : skin.unlock.type==='cash' ? '💵' : '🐔';
-        req.textContent = buyable
-          ? `${icon} ${skin.unlock.value} — TAP TO BUY`
-          : ('🔒 ' + unlockRequirementText(skin));
-        card.appendChild(req);
-      }
- 
-      card.onclick = () => {
-        if(!unlocked){
-          if(skin.unlock.type==='coins' || skin.unlock.type==='cash' || skin.unlock.type==='nuggets'){
-            const ok = skin.unlock.type==='coins' ? spendCoins(skin.unlock.value)
-                     : skin.unlock.type==='cash' ? spendCash(skin.unlock.value)
-                     : spendNuggets(skin.unlock.value);
-            if(ok){
-              ownSkin(skin.id);
-              SFX.powerupPickup();
-              renderCurrency();
-              renderGrid();
-            } else {
-              SFX.shieldBlock();
-            }
-          }
-          return;
-        }
-        SFX.uiClick();
-        if(isEnemyCat){
-          setEquippedEnemySkin(cat.enemyType, skin.id);
-        } else {
-          setEquippedSkin(activeCat, skin.id);
-        }
-        renderGrid();
-      };
- 
-      gridEl.appendChild(card);
+      gridEl.appendChild(buildSkinCard(skin, activeCat, isEnemyCat, cat.enemyType, stats, equipped));
     });
   }
  
