@@ -365,7 +365,28 @@
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+const W = canvas.width, H = canvas.height; // fixed world resolution — game logic never changes
+ 
+// ---------- Resolution scaling (per-device) ----------
+// The game always THINKS in a 1366x768 world (W/H above). We just render that
+// world onto a canvas backing-store sized for whatever screen it's on — a 1080p
+// TV gets a sharp 1080p-ish backing store, a 768p laptop stays native — instead
+// of stretching one fixed-size bitmap and going soft/blurry.
+let renderScale = 1;
+function fitCanvasToScreen(){
+  const availW = window.innerWidth;
+  const availH = window.innerHeight;
+  const cssScale = Math.max(0.1, Math.min(availW / W, availH / H));
+  const dpr = window.devicePixelRatio || 1;
+  renderScale = cssScale * dpr;
+  canvas.width = Math.round(W * renderScale);
+  canvas.height = Math.round(H * renderScale);
+  canvas.style.width = Math.round(W * cssScale) + 'px';
+  canvas.style.height = Math.round(H * cssScale) + 'px';
+}
+window.addEventListener('resize', fitCanvasToScreen);
+window.addEventListener('orientationchange', fitCanvasToScreen);
+fitCanvasToScreen();
  
 // ---------- Sound Engine (procedural, Web Audio — no audio files needed) ----------
 const SFX = (() => {
@@ -432,7 +453,7 @@ const SFX = (() => {
     missileLaunch(){ tone('sawtooth', 190, 0.35, {vol:0.11, freqEnd:55}); noiseBurst(0.3, {vol:0.05, filterFreq:2200, filterEnd:300}); },
     laser(){ tone('sawtooth', 900, 0.45, {vol:0.045, freqEnd:600}); },
     lockBeep(){ tone('square', 1200, 0.05, {vol:0.055}); },
-    lockReady(){ tone('square', 1500, 0.1, {vol:0.09, freqEnd:1900}); },
+    lockReady(){ tone('square', 1500, 0.1, {vol:0.09, freqEnd:1900}); rumble(40, 0.2, 0.4); },
     flare(){ noiseBurst(0.18, {vol:0.12, filterFreq:3200, filterEnd:800}); tone('triangle', 700, 0.12, {vol:0.05, freqEnd:300}); },
     hit(){ tone('square', 220, 0.06, {vol:0.05, freqEnd:100}); },
     explosionSmall(){ noiseBurst(0.16, {vol:0.13, filterFreq:1800, filterEnd:150}); tone('sawtooth', 140, 0.14, {vol:0.07, freqEnd:40}); },
@@ -440,11 +461,12 @@ const SFX = (() => {
       noiseBurst(0.32*size, {vol:0.2, filterFreq:2200, filterEnd:80});
       tone('sawtooth', 110, 0.38*size, {vol:0.13, freqEnd:28});
     },
-    playerHit(){ noiseBurst(0.14, {vol:0.13, filterFreq:1200, filterEnd:200}); tone('square', 150, 0.14, {vol:0.08, freqEnd:60}); },
+    playerHit(){ noiseBurst(0.14, {vol:0.13, filterFreq:1200, filterEnd:200}); tone('square', 150, 0.14, {vol:0.08, freqEnd:60}); rumble(160, 0.6, 0.9); },
     playerDeath(){
       noiseBurst(0.7, {vol:0.24, filterFreq:2200, filterEnd:60});
       tone('sawtooth', 220, 0.8, {vol:0.15, freqEnd:28});
       setTimeout(()=>tone('sawtooth', 160, 0.5, {vol:0.1, freqEnd:20}), 120);
+      rumble(500, 0.9, 1.0);
     },
     waveStart(){
       tone('square', 440, 0.12, {vol:0.07});
@@ -460,7 +482,7 @@ const SFX = (() => {
       tone('square', 660, 0.09, {vol:0.07, freqEnd:1100});
       setTimeout(()=>tone('square', 990, 0.1, {vol:0.06, freqEnd:1400}), 70);
     },
-    shieldBlock(){ tone('square', 500, 0.08, {vol:0.06, freqEnd:900}); },
+    shieldBlock(){ tone('square', 500, 0.08, {vol:0.06, freqEnd:900}); rumble(80, 0.25, 0.25); },
     shieldActivate(){
       tone('sine', 500, 0.25, {vol:0.09, freqEnd:1000});
       noiseBurst(0.15, {vol:0.06, filterFreq:3000, filterEnd:1200});
@@ -501,44 +523,70 @@ let gamepadPrev = { x:false, o:false, tri:false };
 const GP_DEADZONE = 0.2;
  
 window.addEventListener('gamepadconnected', (e) => {
-  gamepadIndex = e.gamepad.index;
-  console.log('%c[GAMEPAD CONNECTED]', 'color:#0f8;font-weight:bold;', e.gamepad.id);
-  const el = document.getElementById('gpIndicator');
-  if(el) el.style.display = 'block';
+  console.log('%c[GAMEPAD CONNECTED]', 'color:#0f8;font-weight:bold;', e.gamepad.id, 'index', e.gamepad.index);
 });
 window.addEventListener('gamepaddisconnected', (e) => {
   if(gamepadIndex === e.gamepad.index) gamepadIndex = null;
   console.log('[GAMEPAD DISCONNECTED]', e.gamepad.id);
-  const el = document.getElementById('gpIndicator');
-  if(el) el.style.display = 'none';
 });
+ 
+// ---------- Rumble ----------
+// Buzzes whichever gamepad is currently active. Safe no-op if nothing's
+// connected or the browser/pad doesn't support haptics.
+function rumble(duration=150, weak=0.4, strong=0.7){
+  if(gamepadIndex === null) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = pads[gamepadIndex];
+  if(!gp) return;
+  const actuator = gp.vibrationActuator || (gp.hapticActuators && gp.hapticActuators[0]);
+  if(!actuator) return;
+  try{
+    if(actuator.playEffect){
+      actuator.playEffect('dual-rumble', { startDelay:0, duration, weakMagnitude:weak, strongMagnitude:strong }).catch(()=>{});
+    } else if(actuator.pulse){
+      actuator.pulse(strong, duration);
+    }
+  } catch(e){ /* haptics not available on this pad — ignore */ }
+}
  
 function pollGamepad(){
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  let gp = null;
- 
-  // prefer the previously locked index if it's still connected
-  if(gamepadIndex !== null && pads[gamepadIndex] && pads[gamepadIndex].connected){
-    gp = pads[gamepadIndex];
-  } else {
-    // fallback: scan for any connected pad, don't rely solely on the connect event
-    for(let i=0;i<pads.length;i++){
-      if(pads[i] && pads[i].connected){
-        gp = pads[i];
-        gamepadIndex = i;
-        const el = document.getElementById('gpIndicator');
-        if(el) el.style.display = 'block';
-        break;
-      }
-    }
-    if(!gp && gamepadIndex !== null){
-      gamepadIndex = null;
-      const el = document.getElementById('gpIndicator');
-      if(el) el.style.display = 'none';
-    }
+  const connected = [];
+  for(let i=0;i<pads.length;i++){
+    if(pads[i] && pads[i].connected) connected.push(pads[i]);
   }
  
-  if(!gp) return null;
+  const el = document.getElementById('gpIndicator');
+  if(el){
+    if(connected.length > 1){ el.style.display = 'block'; el.textContent = `🎮 ${connected.length} CONTROLLERS CONNECTED`; }
+    else if(connected.length === 1){ el.style.display = 'block'; el.textContent = '🎮 CONTROLLER CONNECTED'; }
+    else el.style.display = 'none';
+  }
+ 
+  if(connected.length === 0){
+    gamepadIndex = null;
+    return null;
+  }
+ 
+  // Multiple controllers can be plugged in at once — whichever one is actually
+  // being touched this frame becomes the active pad, so you can hand off the
+  // controller or grab whichever's closest without any menu fiddling.
+  function hasInput(pad){
+    if(Math.abs(pad.axes[0]||0) > GP_DEADZONE || Math.abs(pad.axes[1]||0) > GP_DEADZONE) return true;
+    for(const b of pad.buttons) if(b && b.pressed) return true;
+    return false;
+  }
+ 
+  let gp = null;
+  for(const pad of connected){
+    if(hasInput(pad)){ gp = pad; break; }
+  }
+  if(!gp){
+    // nobody's touching a stick/button this frame — stick with whichever pad
+    // was already active if it's still connected, otherwise default to the first
+    gp = (gamepadIndex !== null && connected.find(p => p.index === gamepadIndex)) || connected[0];
+  }
+  gamepadIndex = gp.index;
  
   let mx = 0, my = 0;
   // left stick
@@ -2166,6 +2214,7 @@ function drawStars(){
  
 function render(){
   ctx.save();
+  ctx.scale(renderScale, renderScale);
   if(shakeT>0){
     ctx.translate(rand(-4,4),rand(-4,4));
     shakeT--;
@@ -2688,7 +2737,6 @@ function openSkinsScreen(){
   overlay.id = 'skinsOverlay';
  
   const categories = [
-    { key:'black_market', label:'BLACK MARKET', black_market:true},
     { key:'abilities', label:'ABILITIES', abilities:true },
     { key:'ship', label:'SHIP', list:SHIP_SKINS },
     { key:'bullet', label:'BULLETS', list:BULLET_SKINS },
@@ -2753,76 +2801,7 @@ function openSkinsScreen(){
     const stats = getStats();
     const equipped = getEquippedSkins();
     const cat = categories.find(c => c.key===activeCat);
-
-   if(cat.black_market){
-  BLACK_MARKET_ITEMS.forEach(item => {
-    const owned = hasItem(item.id);
-
-    const card = document.createElement('div');
-    card.className = 'skinCard' + (owned ? ' equipped' : '');
-    card.style.padding = '10px';
-
-    const icon = document.createElement('div');
-    icon.style.cssText = `
-      width:48px;
-      height:48px;
-      margin:0 auto 6px;
-      border-radius:50%;
-      background:${item.color};
-      box-shadow:0 0 12px ${item.color};
-    `;
-    card.appendChild(icon);
-
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'skinName';
-    nameEl.textContent = item.name;
-    card.appendChild(nameEl);
-
-
-    const descEl = document.createElement('div');
-    descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
-    descEl.textContent = item.desc;
-    card.appendChild(descEl);
-
-
-    if(owned){
-      const tag = document.createElement('div');
-      tag.className = 'skinEquippedTag';
-      tag.textContent = 'OWNED';
-      card.appendChild(tag);
-
-    } else {
-
-      const req = document.createElement('div');
-      req.className = 'skinReq';
-      req.textContent =
-        `${item.costType==='coins' ? '🪙' : '💵'} ${item.cost} — TAP TO BUY`;
-
-      req.onclick = () => {
-        if(item.costType === 'coins' && coins >= item.cost){
-
-          coins -= item.cost;
-          saveCurrency();
-
-          addItem(item.id);
-
-          card.classList.add('equipped');
-          req.textContent = 'OWNED';
-
-        } else {
-          req.textContent = 'NOT ENOUGH MONEY';
-        }
-      };
-
-      card.appendChild(req);
-    }
-
-
-    container.appendChild(card);
-  });
-}
-   
+ 
     if(cat.abilities){
       ABILITY_DEFS.forEach(ab => {
         const owned = hasAbility(ab.id);
@@ -3106,101 +3085,10 @@ document.addEventListener('DOMContentLoaded', () => {
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
 }
-
-const BLACK_MARKET_ITEMS = [
-  {
-    id:"glitch_chip",
-    name:"Glitch Chip",
-    desc:"a corrupted tournament upgrade. nobody knows what it does.",
-    cost:1500,
-    costType:"coins",
-    color:"#00ffff"
-  },
-
-  {
-    id:"void_core",
-    name:"Void Core",
-    desc:"an unstable power source from somewhere... else.",
-    cost:5000,
-    costType:"coins",
-    color:"#8a00ff"
-  },
-
-  {
-    id:"prototype_engine",
-    name:"Prototype Engine",
-    desc:"experimental tech. warranty expired 3 years ago.",
-    cost:7500,
-    costType:"coins",
-    color:"#ff6600"
-  },
-
-  {
-    id:"black_market_skin",
-    name:"Shadow Paint",
-    desc:"a suspiciously dark coating for your ship.",
-    cost:2500,
-    costType:"coins",
-    color:"#111111"
-  },
-
-  {
-    id:"hacker_trail",
-    name:"Code Trail",
-    desc:"leaves a trail of floating corrupted code.",
-    cost:3000,
-    costType:"coins",
-    color:"#00ff66"
-  },
-
-  {
-    id:"illegal_booster",
-    name:"Overclock Juice",
-    desc:"makes things faster. probably too fast.",
-    cost:4000,
-    costType:"coins",
-    color:"#ff0033"
-  },
-
-  {
-    id:"ancient_floppy",
-    name:"Ancient Floppy",
-    desc:"contains mysterious fighter data from 1997.",
-    cost:1997,
-    costType:"coins",
-    color:"#cccccc"
-  },
-
-  {
-    id:"dev_console",
-    name:"Broken Dev Console",
-    desc:"it was never meant to leave the developer room.",
-    cost:10000,
-    costType:"coins",
-    color:"#ffff00"
-  },
-
-  {
-    id:"forbidden_texture",
-    name:"Forbidden Texture",
-    desc:"the shopkeeper refuses to explain this one.",
-    cost:6666,
-    costType:"coins",
-    color:"#ff00ff"
-  },
-
-  {
-    id:"mystery_box",
-    name:"Mystery Box",
-    desc:"could be amazing. could be absolutely useless.",
-    cost:1000,
-    costType:"coins",
-    color:"#ffffff"
-  }
-];
  
 </script>
 </body>
 </html>
+ 
  
  
