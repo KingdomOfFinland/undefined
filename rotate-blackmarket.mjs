@@ -30,7 +30,7 @@ const COUNTS = {
 // Keep this in sync with the client — see comment above.
 const CRATE_IDS = [
   'crate_scrap', 'crate_contraband', 'crate_nuggets', 'crate_rusty', 'crate_jackpot',
-  'crate_convoy', 'crate_vault'
+  'crate_convoy', 'crate_vault', 'crate_skins'
 ];
 const ABILITY_IDS = [
   'ability_shield_ability', 'ability_missilepanic_ability', 'ability_commsjam_ability', 'ability_backup_ability'
@@ -73,6 +73,7 @@ const DISPLAY = {
   crate_jackpot:    { name: 'Jackpot Crate',      price: 20,  type: 'crate' },
   crate_convoy:     { name: 'Convoy Crate',       price: 25,  type: 'crate' },
   crate_vault:      { name: 'Vault Crate',        price: 35,  type: 'crate' },
+  crate_skins:      { name: 'Skin Crate',         price: 350, type: 'crate' },
   ability_shield_ability:       { name: 'Shield Burst',   price: 400, type: 'ability' },
   ability_missilepanic_ability: { name: 'Missile Panic',  price: 12,  type: 'ability' },
   ability_commsjam_ability:     { name: 'Comms Jam',      price: 450, type: 'ability' },
