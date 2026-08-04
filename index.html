@@ -862,6 +862,16 @@ const SHIP_SKINS = [
     ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#7fffd4'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
     drawThruster(ctx,th,'rgba(127,255,212,0.85)');
+  }},
+  // Black-market exclusive — not obtainable from the normal SHIP tab.
+  { id:'blackout', name:'Blackout Interceptor', unlock:{type:'nuggets', value:150}, exclusive:true, draw(ctx,th){
+    ctx.fillStyle='#0a0a0f'; ctx.strokeStyle='#ff2fd6'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ff2fd6'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(255,47,214,0.85)');
   }}
 ];
  
@@ -875,7 +885,8 @@ const BULLET_SKINS = [
   { id:'coin_bullet', name:'Bounty Rounds', unlock:{type:'coins', value:150}, color:'#ffae00' },
   { id:'cash_bullet', name:'Reaper Rounds', unlock:{type:'cash', value:6}, color:'#6bff8f' },
   { id:'nugget_bullet', name:'Nugget Rounds', unlock:{type:'nuggets', value:40}, color:'#d9a441' },
-  { id:'aurora_bullet', name:'Aurora Rounds', unlock:{type:'score', value:16000}, color:'#7fffd4' }
+  { id:'aurora_bullet', name:'Aurora Rounds', unlock:{type:'score', value:16000}, color:'#7fffd4' },
+  { id:'contraband_bullet', name:'Contraband Rounds', unlock:{type:'nuggets', value:80}, exclusive:true, color:'#ff2fd6' }
 ];
  
 const MISSILE_SKINS = [
@@ -888,7 +899,8 @@ const MISSILE_SKINS = [
   { id:'coin_missile', name:'Bounty Seeker', unlock:{type:'coins', value:200}, color:'#ffd23d' },
   { id:'cash_missile', name:'Reaper Seeker', unlock:{type:'cash', value:8}, color:'#ff3d5c' },
   { id:'nugget_missile', name:'Nugget Seeker', unlock:{type:'nuggets', value:50}, color:'#d9a441' },
-  { id:'aurora_missile', name:'Aurora Seeker', unlock:{type:'wave', value:22}, color:'#7fffd4' }
+  { id:'aurora_missile', name:'Aurora Seeker', unlock:{type:'wave', value:22}, color:'#7fffd4' },
+  { id:'contraband_missile', name:'Contraband Seeker', unlock:{type:'nuggets', value:100}, exclusive:true, color:'#ff2fd6' }
 ];
  
 const FLARE_SKINS = [
@@ -899,7 +911,8 @@ const FLARE_SKINS = [
   { id:'coin_flare', name:'Bounty Flare', unlock:{type:'coins', value:120}, color:'255,215,0' },
   { id:'cash_flare', name:'Reaper Flare', unlock:{type:'cash', value:5}, color:'107,255,143' },
   { id:'nugget_flare', name:'Nugget Flare', unlock:{type:'nuggets', value:30}, color:'217,164,65' },
-  { id:'aurora_flare', name:'Aurora Flare', unlock:{type:'kills', value:800}, color:'127,255,212' }
+  { id:'aurora_flare', name:'Aurora Flare', unlock:{type:'kills', value:800}, color:'127,255,212' },
+  { id:'contraband_flare', name:'Contraband Flare', unlock:{type:'nuggets', value:60}, exclusive:true, color:'255,47,214' }
 ];
  
 // ---------- Enemy Skins ----------
@@ -2494,6 +2507,17 @@ function loop(){
   checkWaveEnd();
   render();
   if(player.hp<=0 && !godMode){
+    if(player.secondChances > 0){
+      player.secondChances--;
+      player.hp = Math.round(player.maxHp * 0.5);
+      player.shieldT = Math.max(player.shieldT, 120);
+      shakeT = 14;
+      spawnParticles(player.x,player.y,'#ff3d5c',24,5,4.5);
+      spawnParticles(player.x,player.y,'#5ecbff',16,3.5);
+      SFX.shieldBlock();
+      requestAnimationFrame(loop);
+      return;
+    }
     spawnParticles(player.x,player.y,'#5ecbff',24,5,4.5);
     spawnParticles(player.x,player.y,'#ff4d6d',18,4,3.5);
     spawnParticles(player.x,player.y,'#fff',8,2.5,5);
@@ -2516,8 +2540,17 @@ async function resetGame(){
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[];
+ 
+  // Apply any black-market consumables purchased for this run, then clear the queue.
+  const pending = getPendingConsumables();
+  if(pending.extra_flare) player.flares = Math.min(5, player.flares + pending.extra_flare * 2);
+  if(pending.instant_shield) player.shieldT = Math.max(player.shieldT, 360);
+  if(pending.head_start) player.rapidFireT = Math.max(player.rapidFireT, 360);
+  player.secondChances = pending.second_chance || 0;
+  clearPendingConsumables();
+ 
   document.getElementById('score').textContent=0;
-  document.getElementById('flarecount').textContent=3;
+  document.getElementById('flarecount').textContent=player.flares;
   updateCurrencyHud();
   document.getElementById('center').classList.add('hidden');
   startWave(1);
@@ -2883,6 +2916,27 @@ const BLACKMARKET_CRATES = [
       { weight:20, type:'cash', min:20, max:50 },
       { weight:10, type:'coins', min:800, max:1500 }
     ]
+  },
+  {
+    id:'crate_convoy', name:'Convoy Crate', costType:'cash', cost:25, color:'#4ecdc4',
+    desc:'Intercepted supply run. Solid mixed rewards.',
+    rewards:[
+      { weight:20, type:'coins', min:300, max:700 },
+      { weight:25, type:'cash', min:8, max:20 },
+      { weight:20, type:'nuggets', min:5, max:12 },
+      { weight:20, type:'ability' },
+      { weight:15, type:'skin' }
+    ]
+  },
+  {
+    id:'crate_vault', name:'Vault Crate', costType:'nuggets', cost:35, color:'#00e5ff',
+    desc:'Deep-market vault. Heavily favors rare unlocks — including exclusives.',
+    rewards:[
+      { weight:40, type:'skin' },
+      { weight:35, type:'ability' },
+      { weight:15, type:'cash', min:30, max:60 },
+      { weight:10, type:'coins', min:1000, max:2000 }
+    ]
   }
 ];
  
@@ -2902,11 +2956,43 @@ const BLACKMARKET_SKIN_CATEGORIES = [
 ];
 function isBuyableSkin(s){ return s.unlock.type==='coins' || s.unlock.type==='cash' || s.unlock.type==='nuggets'; }
  
+// One-time-use items that apply their effect at the start of your NEXT run.
+// Stackable — buying the same one twice queues two.
+const BLACKMARKET_CONSUMABLES = [
+  { id:'extra_flare', name:'Flare Pack', desc:'+2 flares at the start of your next run.', costType:'coins', cost:100, color:'#ffaa00' },
+  { id:'instant_shield', name:'Instant Shield', desc:'Start your next run with a 6s shield already up.', costType:'cash', cost:6, color:'#5ecbff' },
+  { id:'head_start', name:'Head Start', desc:'Start your next run with 6s of rapid fire already active.', costType:'coins', cost:250, color:'#ffd23d' },
+  { id:'second_chance', name:'Second Chance', desc:'Survive one otherwise-fatal hit next run — revives at half HP, once.', costType:'nuggets', cost:15, color:'#ff3d5c' }
+];
+function getPendingConsumables(){
+  try { return JSON.parse(localStorage.getItem('uf_pending_consumables')) || {}; } catch(e){ return {}; }
+}
+function addPendingConsumable(id){
+  const p = getPendingConsumables();
+  p[id] = (p[id]||0) + 1;
+  localStorage.setItem('uf_pending_consumables', JSON.stringify(p));
+}
+function clearPendingConsumables(){
+  localStorage.setItem('uf_pending_consumables', '{}');
+}
+ 
+// Bulk currency exchange deals — better than the standard in-game conversion
+// rates (100 coins:1 cash, 1 coin:2 nuggets), framed as a black-market perk.
+// Instant effect, repeatable — not queued like the consumables above.
+const BLACKMARKET_EXCHANGES = [
+  { id:'bulk_coins_to_cash', name:'Bulk Coin Exchange', desc:'500 🪙 → 7 💵 (better than the standard rate)', costType:'coins', cost:500, giveType:'cash', giveAmount:7 },
+  { id:'bulk_cash_to_coins', name:'Bulk Cash Exchange', desc:'10 💵 → 1200 🪙', costType:'cash', cost:10, giveType:'coins', giveAmount:1200 },
+  { id:'bulk_nuggets_to_cash', name:'Bulk Nugget Deal', desc:'1000 🐔 → 6 💵', costType:'nuggets', cost:1000, giveType:'cash', giveAmount:6 }
+];
+ 
 function blackMarketAllPossibleIds(){
   const ids = BLACKMARKET_CRATES.map(c => c.id);
   ABILITY_DEFS.forEach(a => ids.push('ability_' + a.id));
+  BLACKMARKET_CONSUMABLES.forEach(c => ids.push('consumable_' + c.id));
+  BLACKMARKET_EXCHANGES.forEach(x => ids.push('exchange_' + x.id));
   BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list}) => {
-    list.filter(isBuyableSkin).forEach(s => ids.push('skin_' + key + '_' + s.id));
+    list.filter(s => isBuyableSkin(s) && !s.exclusive).forEach(s => ids.push('skin_' + key + '_' + s.id));
+    list.filter(s => s.exclusive).forEach(s => ids.push('exclusive_' + key + '_' + s.id));
   });
   return ids;
 }
@@ -3266,6 +3352,89 @@ function openSkinsScreen(){
         gridEl.appendChild(card);
       });
  
+      BLACKMARKET_CONSUMABLES.filter(c => inStock('consumable_' + c.id)).forEach(c => {
+        const pendingCount = getPendingConsumables()[c.id] || 0;
+        const card = document.createElement('div');
+        card.className = 'skinCard';
+        card.style.padding = '10px';
+ 
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;border-radius:8px;background:${c.color};box-shadow:0 0 10px ${c.color};`;
+        card.appendChild(icon);
+ 
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = c.name + (pendingCount ? ` (x${pendingCount} queued)` : '');
+        card.appendChild(nameEl);
+ 
+        const descEl = document.createElement('div');
+        descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+        descEl.textContent = c.desc;
+        card.appendChild(descEl);
+ 
+        const costIcon = c.costType==='coins' ? '🪙' : c.costType==='cash' ? '💵' : '🐔';
+        const req = document.createElement('div');
+        req.className = 'skinReq';
+        req.textContent = `${costIcon} ${c.cost} — BUY FOR NEXT RUN`;
+        card.appendChild(req);
+ 
+        card.onclick = () => {
+          const ok = c.costType==='coins' ? spendCoins(c.cost)
+                   : c.costType==='cash' ? spendCash(c.cost)
+                   : spendNuggets(c.cost);
+          if(!ok){ SFX.shieldBlock(); return; }
+          addPendingConsumable(c.id);
+          SFX.powerupPickup();
+          renderCurrency();
+          renderGrid();
+        };
+ 
+        gridEl.appendChild(card);
+      });
+ 
+      BLACKMARKET_EXCHANGES.filter(x => inStock('exchange_' + x.id)).forEach(x => {
+        const card = document.createElement('div');
+        card.className = 'skinCard';
+        card.style.padding = '10px';
+ 
+        const giveIcon = x.giveType==='coins' ? '🪙' : x.giveType==='cash' ? '💵' : '🐔';
+        const icon = document.createElement('div');
+        icon.style.cssText = 'width:48px;height:48px;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-size:22px;border-radius:8px;background:rgba(255,255,255,0.06);';
+        icon.textContent = giveIcon;
+        card.appendChild(icon);
+ 
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = x.name;
+        card.appendChild(nameEl);
+ 
+        const descEl = document.createElement('div');
+        descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+        descEl.textContent = x.desc;
+        card.appendChild(descEl);
+ 
+        const costIcon = x.costType==='coins' ? '🪙' : x.costType==='cash' ? '💵' : '🐔';
+        const req = document.createElement('div');
+        req.className = 'skinReq';
+        req.textContent = `${costIcon} ${x.cost} — EXCHANGE`;
+        card.appendChild(req);
+ 
+        card.onclick = () => {
+          const ok = x.costType==='coins' ? spendCoins(x.cost)
+                   : x.costType==='cash' ? spendCash(x.cost)
+                   : spendNuggets(x.cost);
+          if(!ok){ SFX.shieldBlock(); return; }
+          if(x.giveType==='coins') addCoins(x.giveAmount);
+          else if(x.giveType==='cash') addCash(x.giveAmount);
+          else addNuggets(x.giveAmount);
+          SFX.powerupPickup();
+          renderCurrency();
+          renderGrid();
+        };
+ 
+        gridEl.appendChild(card);
+      });
+ 
       ABILITY_DEFS.filter(ab => inStock('ability_' + ab.id)).forEach(ab => {
         const owned = hasAbility(ab.id);
         const card = document.createElement('div');
@@ -3315,8 +3484,20 @@ function openSkinsScreen(){
       });
  
       BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list, enemyType}) => {
-        list.filter(isBuyableSkin).filter(s => inStock('skin_' + key + '_' + s.id)).forEach(skin => {
+        list.filter(s => isBuyableSkin(s) && !s.exclusive).filter(s => inStock('skin_' + key + '_' + s.id)).forEach(skin => {
           gridEl.appendChild(buildSkinCard(skin, key, !!enemyType, enemyType, stats, equipped));
+        });
+      });
+ 
+      // Black-market-exclusive skins — not obtainable anywhere else in the Hangar.
+      BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list, enemyType}) => {
+        list.filter(s => s.exclusive).filter(s => inStock('exclusive_' + key + '_' + s.id)).forEach(skin => {
+          const card = buildSkinCard(skin, key, !!enemyType, enemyType, stats, equipped);
+          const badge = document.createElement('div');
+          badge.textContent = 'EXCLUSIVE';
+          badge.style.cssText = 'font-size:8px;color:#ff2fd6;letter-spacing:1px;margin-top:2px;';
+          card.appendChild(badge);
+          gridEl.appendChild(card);
         });
       });
  
@@ -3331,7 +3512,7 @@ function openSkinsScreen(){
  
     const isEnemyCat = !!cat.enemyType;
  
-    cat.list.forEach(skin => {
+    cat.list.filter(s => !s.exclusive).forEach(skin => {
       gridEl.appendChild(buildSkinCard(skin, activeCat, isEnemyCat, cat.enemyType, stats, equipped));
     });
   }
