@@ -45,6 +45,8 @@
     box-shadow:0 0 12px rgba(0,180,255,0.6);
   }
   button:hover { background:#3cf; }
+  #dailyBtn.claimed { background:#345; color:#789; box-shadow:none; cursor:default; }
+  #dailyBtn.claimed:hover { background:#345; }
   .hidden { display:none !important; }
   #lbList, #curLbList {
     list-style:none; width:100%; text-align:left;
@@ -380,10 +382,11 @@
       F-8 vs everything. WASD/Arrows move. <b>E</b> guns. Hold <b>Q</b> near an enemy to lock on,
       release to fire homing missile. <b>F</b> pops a flare to decoy incoming missiles.<br><br>
       Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
-      Survive the waves. UFOs, enemy fighters, bombers, a spaceship, and Shahed drones incoming.
+      Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
     </p>
     <button id="startBtn">LAUNCH</button>
     <button id="skinsBtnStart">SKINS</button>
+    <button id="dailyBtn">🎁 DAILY</button>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
       <ul id="lbList"><li>Loading...</li></ul>
@@ -1113,6 +1116,29 @@ const ENEMY_SKINS = {
       ctx.moveTo(0,-11); ctx.lineTo(11,11); ctx.lineTo(-11,11);
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }}
+  ],
+  // Tanky/shielded enemy — see the shield regen logic in updateEnemies() and
+  // damageEnemy(). Only one look for now (no purchasable skins), so it's not
+  // wired into the Hangar tabs/Black Market skin listings.
+  sentinel: [
+    { id:'default', name:'Standard Sentinel', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(80,220,255,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0,0,(e.w/2)+10,0,Math.PI*2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = e.shieldHp>0 ? '#2b4a5e' : '#5e2b2b';
+      ctx.strokeStyle = e.shieldHp>0 ? '#4ecdff' : '#ff6b6b';
+      ctx.lineWidth = 2;
+      const w=e.w/2, h=e.h/2;
+      ctx.beginPath();
+      ctx.moveTo(-w*0.5,-h); ctx.lineTo(w*0.5,-h); ctx.lineTo(w,0);
+      ctx.lineTo(w*0.5,h); ctx.lineTo(-w*0.5,h); ctx.lineTo(-w,0);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }}
   ]
 };
  
@@ -1202,6 +1228,10 @@ function ownSkin(id){
   const owned = getOwnedSkins();
   if(!owned.includes(id)){ owned.push(id); localStorage.setItem('uf_owned_skins', JSON.stringify(owned)); }
 }
+function unownSkin(id){
+  const owned = getOwnedSkins().filter(s => s !== id);
+  localStorage.setItem('uf_owned_skins', JSON.stringify(owned));
+}
  
 function getOwnedAbilities(){
   try { return JSON.parse(localStorage.getItem('uf_owned_abilities')) || []; } catch(e){ return []; }
@@ -1211,6 +1241,51 @@ function ownAbility(id){
   if(!owned.includes(id)){ owned.push(id); localStorage.setItem('uf_owned_abilities', JSON.stringify(owned)); }
 }
 function hasAbility(id){ return getOwnedAbilities().includes(id); }
+
+// ---------- Daily login streak ----------
+// Rewards cycle over a 7-day window (index = (streak-1) % 7), but the streak
+// counter itself keeps climbing as long as claims land on consecutive days.
+// Miss a day and it resets to 1 on the next claim.
+const DAILY_REWARDS = [
+  { coins:50 },
+  { coins:75 },
+  { coins:100 },
+  { coins:50, cash:1 },
+  { coins:150 },
+  { coins:75, cash:2 },
+  { coins:100, cash:3, nuggets:5 }
+];
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function getDailyState(){
+  return {
+    streak: parseInt(localStorage.getItem('uf_daily_streak') || '0', 10) || 0,
+    lastClaim: localStorage.getItem('uf_daily_last_claim') || null
+  };
+}
+function canClaimDaily(){
+  return getDailyState().lastClaim !== todayStr();
+}
+// Returns { streak, reward } on success, or null if already claimed today.
+function claimDailyBonus(){
+  const state = getDailyState();
+  const today = todayStr();
+  if(state.lastClaim === today) return null;
+  let streak = 1;
+  if(state.lastClaim){
+    const diffDays = Math.round((new Date(today+'T00:00:00') - new Date(state.lastClaim+'T00:00:00')) / 86400000);
+    streak = diffDays === 1 ? state.streak + 1 : 1;
+  }
+  const reward = DAILY_REWARDS[(streak-1) % DAILY_REWARDS.length];
+  if(reward.coins) addCoins(reward.coins);
+  if(reward.cash) addCash(reward.cash);
+  if(reward.nuggets) addNuggets(reward.nuggets);
+  localStorage.setItem('uf_daily_streak', String(streak));
+  localStorage.setItem('uf_daily_last_claim', today);
+  return { streak, reward };
+}
  
 function updateCurrencyHud(){
   const c = document.getElementById('coinCount');
@@ -1235,7 +1310,7 @@ function getSkinById(list, id){
 }
 const player = {
   x: W/2, y: H-90, vx:0, vy:0, angle:-Math.PI/2,
-  w: 34, h: 30, speed: 5.2,
+  w: 34, h: 30, speed: 5.8,
   hp: 100, maxHp: 100,
   fireCd: 0,
   flares: 3, flareCd: 0,
@@ -1377,7 +1452,8 @@ const ENEMY_EXPLOSION_COLORS = {
   bomber: ['#ff9a3d', '#fff07a'],
   spaceship: ['#5ecbff', '#ff4d6d'],
   carrier: ['#6bff8f', '#ffe066'],
-  drone: ['#ff4d4d', '#cfd4ff']
+  drone: ['#ff4d4d', '#cfd4ff'],
+  sentinel: ['#4ecdff', '#ff6b6b']
 };
 function explodeEnemy(e){
   const colors = ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
@@ -1419,7 +1495,7 @@ function maybeDropPowerup(e){
 }
  
 function awardKillCoins(e){
-  addCoins((e.type==='spaceship' || e.type==='carrier') ? 10 : 1);
+  addCoins((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1);
 }
  
 function applyPowerup(type){
@@ -1572,6 +1648,12 @@ function spawnEnemy(type){
     Object.assign(base,{ hp:150, maxHp:150, w:90,h:40, speed:0.5, scoreVal:600, launchCd: rand(150,220), fireCd: rand(60,100) });
   } else if(type==='drone'){
     Object.assign(base,{ hp:10, maxHp:10, w:22,h:22, speed:2.6, scoreVal:80, diving:false });
+  } else if(type==='sentinel'){
+    // Tanky/shielded — shieldHp soaks all damage first and only regenerates
+    // after a gap in incoming hits (see updateEnemies), so it takes sustained
+    // fire to actually crack the shield and start hitting the hull.
+    Object.assign(base,{ hp:70, maxHp:70, w:56,h:36, speed:0.55, scoreVal:450,
+      fireCd: rand(60,110), shieldHp:140, shieldMax:140, shieldHitTimer:0 });
   }
   enemies.push(base);
 }
@@ -1586,6 +1668,7 @@ function waveComposition(w){
   if(w>=3) for(let i=0;i<Math.min(Math.floor(w/3),2);i++) list.push('bomber');
   if(w%4===0) list.push('spaceship');
   if(w>=6 && w%6===0) list.push('carrier');
+  if(w>=5 && w%5===0) list.push('sentinel');
   return list;
 }
  
@@ -1849,7 +1932,17 @@ function updateEnemies(){
   for(const e of enemies){
     if(!e.alive) continue;
     e.phase += 0.05;
- 
+
+    // Shield regen — generic so it'd apply to any future type with a
+    // shieldMax, but today only Sentinel has one. Ticks down a grace timer
+    // that resets on every hit (see damageEnemy); only once that timer
+    // expires does the shield start refilling, so constant fire is what
+    // keeps it from coming back.
+    if(e.shieldMax){
+      if(e.shieldHitTimer > 0) e.shieldHitTimer--;
+      else if(e.shieldHp < e.shieldMax) e.shieldHp = Math.min(e.shieldMax, e.shieldHp + 0.4);
+    }
+
     if(e.type==='ufo'){
       e.x += Math.sin(e.phase)*2.4;
       if(e.y<100) e.y += e.speed;
@@ -1957,16 +2050,27 @@ function updateEnemies(){
         if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
       } else if(player.commsJamT>0 && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
         // confused kamikaze into another enemy — friendly fire, no score
-        e.confusedTarget.hp -= 20;
+        const targetDead = damageEnemy(e.confusedTarget, 20);
         e.alive=false; e.hp=0;
         explodeEnemy(e);
-        if(e.confusedTarget.hp<=0){
+        if(targetDead){
           e.confusedTarget.alive=false;
           explodeEnemy(e.confusedTarget);
         }
       }
     }
- 
+    else if(e.type==='sentinel'){
+      if(e.y<150) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.35)*0.7;
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = rand(70,110);
+        SFX.enemyShoot();
+        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*3.2,vy:Math.sin(ang)*3.2,w:5,h:5,side:'enemy'});
+      }
+    }
+
     if(e.y>H+60) e.alive=false;
   }
   enemies = enemies.filter(e=>e.alive || e.hp>0);
@@ -1994,17 +2098,35 @@ function addScore(amount){
   document.getElementById('score').textContent = score;
 }
  
+// Routes incoming damage through an enemy's shield first (Sentinel only —
+// shieldHp/shieldMax are undefined on every other type, so this is a no-op
+// pass-through for them). See the shield regen logic in updateEnemies().
+function damageEnemy(e, amount){
+  if(e.shieldHp !== undefined && e.shieldHp > 0){
+    e.shieldHitTimer = 45;
+    if(amount >= e.shieldHp){
+      e.hp -= (amount - e.shieldHp);
+      e.shieldHp = 0;
+    } else {
+      e.shieldHp -= amount;
+    }
+  } else {
+    e.hp -= amount;
+  }
+  return e.hp <= 0;
+}
+
 function updateCollisions(){
   // player bullets vs enemies
   for(const b of bullets){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(b,e,4,e.w/2)){
-        e.hp -= 8;
+        const dead = damageEnemy(e, 8);
         b.dead = true;
         spawnParticles(b.x,b.y,'#4cf',5,2);
         SFX.hit();
-        if(e.hp<=0){
+        if(dead){
           e.alive=false; addScore(e.scoreVal);
           explodeEnemy(e);
           maybeDropPowerup(e);
@@ -2050,11 +2172,11 @@ function updateCollisions(){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(m,e,6,e.w/2)){
-        e.hp -= m.heatseeking ? 45 * HEATSEEK_DAMAGE_MULT : 45;
+        const dead = damageEnemy(e, m.heatseeking ? 45 * HEATSEEK_DAMAGE_MULT : 45);
         m.dead = true;
         spawnParticles(m.x,m.y,'#8df',18,5);
         SFX.explosionSmall();
-        if(e.hp<=0){
+        if(dead){
           e.alive=false; addScore(e.scoreVal);
           explodeEnemy(e);
           maybeDropPowerup(e);
@@ -2087,11 +2209,11 @@ function updateCollisions(){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(m,e,6,e.w/2)){
-        e.hp -= m.heatseeking ? 20 * HEATSEEK_DAMAGE_MULT : 20;
+        const dead = damageEnemy(e, m.heatseeking ? 20 * HEATSEEK_DAMAGE_MULT : 20);
         m.dead = true;
         spawnParticles(m.x,m.y,'#f83',16,4);
         SFX.explosionSmall();
-        if(e.hp<=0){
+        if(dead){
           e.alive=false;
           explodeEnemy(e);
           // no score awarded — friendly fire, not a player kill
@@ -2218,6 +2340,15 @@ function drawEnemy(e){
   }
   ctx.restore();
  
+  // shield bar (Sentinel) — sits above the hp bar so both are visible while
+  // the shield is still soaking hits
+  if(e.shieldMax){
+    ctx.fillStyle='#123';
+    ctx.fillRect(e.x-e.w/2, e.y-e.h/2-16, e.w, 3);
+    ctx.fillStyle='#4ecdff';
+    ctx.fillRect(e.x-e.w/2, e.y-e.h/2-16, e.w*(e.shieldHp/e.shieldMax), 3);
+  }
+
   // hp bar
   if(e.hp<e.maxHp){
     ctx.fillStyle='#300';
@@ -2333,6 +2464,9 @@ function updateHud(){
  
 function checkWaveEnd(){
   if(spawnQueue.length===0 && enemies.length===0){
+    // Wave-clear bonus — scales gently with wave number so late-game runs
+    // feel more worthwhile to push through, on top of per-kill coins.
+    addCoins(10 + wave*2);
     wave++;
     startWave(wave);
   }
@@ -2560,6 +2694,48 @@ async function resetGame(){
  
 document.getElementById('startBtn').onclick = () => { SFX.uiClick(); resetGame(); };
 document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+
+function updateDailyBtnState(){
+  const btn = document.getElementById('dailyBtn');
+  if(!btn) return;
+  const { streak } = getDailyState();
+  if(canClaimDaily()){
+    btn.textContent = streak > 0 ? `🎁 DAILY (Day ${streak+1})` : '🎁 DAILY';
+    btn.classList.remove('claimed');
+  } else {
+    btn.textContent = `🎁 CLAIMED (Day ${streak})`;
+    btn.classList.add('claimed');
+  }
+}
+function showDailyResultModal(streak, reward){
+  const wrap = document.getElementById('wrap');
+  const parts = [];
+  if(reward.coins) parts.push(`${reward.coins} 🪙`);
+  if(reward.cash) parts.push(`${reward.cash} 💵`);
+  if(reward.nuggets) parts.push(`${reward.nuggets} 🐔`);
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,5,10,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:100;';
+  modal.innerHTML = `
+    <div style="font-size:13px;color:#8cf;">Day ${streak} streak bonus</div>
+    <div style="font-size:20px;color:#0ff;text-shadow:0 0 12px #0ff;text-align:center;max-width:280px;">+${parts.join(' + ')}</div>
+    <div style="font-size:10px;color:#9cd;max-width:260px;text-align:center;">Come back tomorrow to keep the streak going — miss a day and it resets.</div>
+    <button id="dailyResultOk">OK</button>
+  `;
+  wrap.appendChild(modal);
+  modal.querySelector('#dailyResultOk').onclick = () => {
+    SFX.uiClick();
+    wrap.removeChild(modal);
+  };
+}
+document.getElementById('dailyBtn').onclick = () => {
+  const result = claimDailyBonus();
+  if(!result){ SFX.shieldBlock(); return; }
+  SFX.powerupPickup();
+  updateDailyBtnState();
+  showDailyResultModal(result.streak, result.reward);
+};
+updateDailyBtnState();
+
 const muteBtnEl = document.getElementById('muteBtn');
 if(muteBtnEl){
   muteBtnEl.onclick = () => {
@@ -2937,14 +3113,7 @@ const BLACKMARKET_CRATES = [
       { weight:15, type:'cash', min:30, max:60 },
       { weight:10, type:'coins', min:1000, max:2000 }
     ]
-  },
-  {
-    id:'crate_skins', name:'Skin Crate', costType:'cash', cost:1, color:'#96332c',
-    desc:'Skins, just skins son.',
-    rewards:[
-      { weight:40, type:'skin' }
-    ]
- },
+  }
 ];
  
 // Skin lists grouped the same way the Hangar tabs are, so the black market can
@@ -2989,7 +3158,8 @@ function clearPendingConsumables(){
 const BLACKMARKET_EXCHANGES = [
   { id:'bulk_coins_to_cash', name:'Bulk Coin Exchange', desc:'500 🪙 → 7 💵 (better than the standard rate)', costType:'coins', cost:500, giveType:'cash', giveAmount:7 },
   { id:'bulk_cash_to_coins', name:'Bulk Cash Exchange', desc:'10 💵 → 1200 🪙', costType:'cash', cost:10, giveType:'coins', giveAmount:1200 },
-  { id:'bulk_nuggets_to_cash', name:'Bulk Nugget Deal', desc:'1000 🐔 → 6 💵', costType:'nuggets', cost:1000, giveType:'cash', giveAmount:6 }
+  { id:'bulk_nuggets_to_cash', name:'Bulk Nugget Deal', desc:'1000 🐔 → 6 💵', costType:'nuggets', cost:1000, giveType:'cash', giveAmount:6 },
+  { id:'bulk_cash_to_nuggets', name:'Cash-to-Nugget Deal', desc:'3 💵 → 300 🐔', costType:'cash', cost:3, giveType:'nuggets', giveAmount:300 }
 ];
  
 function blackMarketAllPossibleIds(){
@@ -3317,7 +3487,94 @@ function openSkinsScreen(){
       }
  
       const inStock = id => marketStock[id] !== undefined;
- 
+
+      function addSectionLabel(text, color){
+        const label = document.createElement('div');
+        label.style.cssText = `grid-column:1/-1;font-size:11px;color:${color || '#8cf'};letter-spacing:2px;margin:4px 0 4px;text-align:left;opacity:0.85;`;
+        label.textContent = text;
+        gridEl.appendChild(label);
+      }
+
+      // ---- Owned section — abilities/skins you already bought, regardless of
+      // whether they're in stock right now. Crates aren't persistent items
+      // (they're consumed the moment you open them), so they never show here.
+      const ownedAbilities = ABILITY_DEFS.filter(ab => hasAbility(ab.id));
+      const ownedMarketSkins = [];
+      BLACKMARKET_SKIN_CATEGORIES.forEach(({key, list, enemyType}) => {
+        list.filter(isBuyableSkin).filter(s => getOwnedSkins().includes(s.id)).forEach(skin => {
+          ownedMarketSkins.push({ skin, key, enemyType });
+        });
+      });
+
+      if(ownedAbilities.length || ownedMarketSkins.length){
+        addSectionLabel('OWNED', '#0f8');
+
+        ownedAbilities.forEach(ab => {
+          const card = document.createElement('div');
+          card.className = 'skinCard equipped';
+          card.style.padding = '10px';
+
+          const icon = document.createElement('div');
+          icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;border-radius:50%;background:${ab.color};box-shadow:0 0 12px ${ab.color};`;
+          card.appendChild(icon);
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'skinName';
+          nameEl.textContent = `${ab.name} [${ab.keyLabel} / ${ab.gpLabel}]`;
+          card.appendChild(nameEl);
+
+          const descEl = document.createElement('div');
+          descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+          descEl.textContent = ab.desc;
+          card.appendChild(descEl);
+
+          const tag = document.createElement('div');
+          tag.className = 'skinEquippedTag';
+          tag.textContent = 'OWNED';
+          card.appendChild(tag);
+
+          gridEl.appendChild(card);
+        });
+
+        ownedMarketSkins.forEach(({skin, key, enemyType}) => {
+          const card = buildSkinCard(skin, key, !!enemyType, enemyType, stats, equipped);
+          if(skin.exclusive){
+            const badge = document.createElement('div');
+            badge.textContent = 'EXCLUSIVE';
+            badge.style.cssText = 'font-size:8px;color:#ff2fd6;letter-spacing:1px;margin-top:2px;';
+            card.appendChild(badge);
+          }
+
+          // Sell-back — 40% refund in the same currency it was bought with,
+          // removes ownership, and un-equips it first if it's active.
+          const refund = Math.max(1, Math.floor(skin.unlock.value * 0.4));
+          const refundIcon = skin.unlock.type==='coins' ? '🪙' : skin.unlock.type==='cash' ? '💵' : '🐔';
+          const sellBtn = document.createElement('button');
+          sellBtn.textContent = `SELL (+${refund}${refundIcon})`;
+          sellBtn.style.cssText = 'margin-top:6px;font-size:8px;padding:3px 6px;background:rgba(255,60,60,0.15);border:1px solid #a33;color:#f88;border-radius:4px;cursor:pointer;width:100%;';
+          sellBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            unownSkin(skin.id);
+            if(enemyType){
+              if(getEquippedEnemySkin(enemyType) === skin.id) setEquippedEnemySkin(enemyType, 'default');
+            } else if(getEquippedSkins()[key] === skin.id){
+              setEquippedSkin(key, 'default');
+            }
+            if(skin.unlock.type==='coins') addCoins(refund);
+            else if(skin.unlock.type==='cash') addCash(refund);
+            else addNuggets(refund);
+            SFX.uiClick();
+            renderCurrency();
+            renderGrid();
+          };
+          card.appendChild(sellBtn);
+
+          gridEl.appendChild(card);
+        });
+
+        addSectionLabel('FOR SALE', '#8cf');
+      }
+
       BLACKMARKET_CRATES.filter(c => inStock(c.id)).forEach(crate => {
         const card = document.createElement('div');
         card.className = 'skinCard';
@@ -3666,6 +3923,3 @@ if(document.getElementById('center')){
 </script>
 </body>
 </html>
- 
- 
- 
