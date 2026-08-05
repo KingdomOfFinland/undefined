@@ -1668,8 +1668,8 @@ function spawnEnemy(type){
     // Tanky/shielded — shieldHp soaks all damage first and only regenerates
     // after a gap in incoming hits (see updateEnemies), so it takes sustained
     // fire to actually crack the shield and start hitting the hull.
-    Object.assign(base,{ hp:70, maxHp:70, w:56,h:36, speed:0.55, scoreVal:450,
-      fireCd: rand(60,110), shieldHp:140, shieldMax:140, shieldHitTimer:0 });
+    Object.assign(base,{ hp:128, maxHp:128, w:56,h:36, speed:0.55, scoreVal:450,
+      fireCd: rand(60,110), shieldHp:256, shieldMax:256, shieldHitTimer:0 });
   }
   enemies.push(base);
 }
