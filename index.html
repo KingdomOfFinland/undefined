@@ -1693,7 +1693,8 @@ let spawnTimer = 0;
 function startWave(w){
   spawnQueue = waveComposition(w).sort(()=>Math.random()-0.5);
   spawnTimer = 0;
-  corruptionLevel = Math.min(1, w / 30);  // full corruption at wave 30+
+  // CORRUPTION: starts at wave 192, fully corrupted by wave 256
+  corruptionLevel = w < 192 ? 0 : Math.min(1, (w - 192) / (256 - 192));
   SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
@@ -1780,14 +1781,8 @@ function updatePlayer(){
   if(gp){ mx += gp.mx; my += gp.my; }
   mx = clamp(mx,-1,1); my = clamp(my,-1,1);
   const len = Math.hypot(mx,my)||1;
-  
-  // CORRUPTION MECHANIC: distort movement and slow at higher waves
-  const corruptionWarp = Math.sin(frame * 0.03 + corruptionLevel * 5) * corruptionLevel * 6;
-  const speedMult = 1 - corruptionLevel * 0.2;
-  const noisyX = corruptionLevel > 0 ? Math.sin(frame * 0.05 + player.y * 0.01) * corruptionLevel * 4 : 0;
-  
-  player.x += (mx/len)*player.speed*speedMult + corruptionWarp + noisyX;
-  player.y += (my/len)*player.speed*speedMult + corruptionWarp;
+  player.x += (mx/len)*player.speed;
+  player.y += (my/len)*player.speed;
   player.x = clamp(player.x, 20, W-20);
   player.y = clamp(player.y, 20, H-20);
  
@@ -1955,14 +1950,6 @@ function updateEnemies(){
   for(const e of enemies){
     if(!e.alive) continue;
     e.phase += 0.05;
-    
-    // CORRUPTION: all enemies jitter/warp when corruption is high
-    if(corruptionLevel > 0.2){
-      const wobbleX = Math.sin(frame * 0.02 + e.phase) * corruptionLevel * 3;
-      const wobbleY = Math.cos(frame * 0.015 + e.phase) * corruptionLevel * 2;
-      e.x += wobbleX;
-      e.y += wobbleY;
-    }
 
     // Shield regen — generic so it'd apply to any future type with a
     // shieldMax, but today only Sentinel has one. Ticks down a grace timer
@@ -1987,12 +1974,7 @@ function updateEnemies(){
       }
     }
     else if(e.type==='fighter'){
-      // CORRUPTION: fighters aim at random spots when corrupted
-      let targetX = player.x;
-      if(corruptionLevel > 0.3 && Math.random() < corruptionLevel * 0.2){
-        targetX = rand(60, W-60);  // glitch target
-      }
-      const dx = targetX - e.x;
+      const dx = player.x-e.x;
       e.x += clamp(dx,-e.speed,e.speed);
       if(e.y < 140+Math.sin(e.phase)*30) e.y += e.speed;
       e.fireCd--;
@@ -2061,12 +2043,10 @@ function updateEnemies(){
       }
     }
     else if(e.type==='drone'){
-      if(!e.diving && e.y>120) e.diving = Math.random()<(0.02 + corruptionLevel*0.05);  // dive more when corrupted
+      if(!e.diving && e.y>120) e.diving = Math.random()<0.02;
       if(e.diving){
         let tgt = player;
-        // CORRUPTION: drones lose target tracking at high corruption
-        const corruptionConfuse = Math.random() < corruptionLevel * 0.15;
-        if(player.commsJamT>0 || corruptionConfuse){
+        if(player.commsJamT>0){
           if(!e.confusedTarget || !e.confusedTarget.alive || frame % 50 === 0){
             const candidates = enemies.filter(en=>en.alive && en!==e);
             e.confusedTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
@@ -2076,9 +2056,8 @@ function updateEnemies(){
           e.confusedTarget = null;
         }
         const ang = Math.atan2(tgt.y-e.y, tgt.x-e.x);
-        const glitchAngle = corruptionLevel * Math.sin(frame * 0.1) * 0.3;  // angle wobble
-        e.x += Math.cos(ang + glitchAngle)*e.speed*1.4;
-        e.y += Math.sin(ang + glitchAngle)*e.speed*1.4;
+        e.x += Math.cos(ang)*e.speed*1.4;
+        e.y += Math.sin(ang)*e.speed*1.4;
       } else {
         e.y += e.speed*0.6;
         e.x += Math.sin(e.phase)*1.5;
@@ -2350,6 +2329,12 @@ function updateParticles(){
 function drawPlayer(){
   ctx.save();
   ctx.translate(player.x, player.y);
+  
+  // CORRUPTION: player also glitches with color inversion
+  if(corruptionLevel > 0.5){
+    ctx.filter = `invert(${corruptionLevel * 50}%)`;
+  }
+  
   const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright'];
   const equipped = getEquippedSkins();
   const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
@@ -2367,6 +2352,13 @@ function drawPlayer(){
 function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x,e.y);
+  
+  // CORRUPTION: invert colors of some enemies at high corruption
+  const shouldInvert = corruptionLevel > 0.3 && Math.sin(frame * 0.05 + e.phase) > 0;
+  if(shouldInvert){
+    ctx.filter = `invert(${corruptionLevel * 100}%)`;
+  }
+  
   const skinList = ENEMY_SKINS[e.type];
   if(skinList){
     const equippedId = getEquippedEnemySkin(e.type);
@@ -2475,6 +2467,23 @@ function drawStars(){
 function renderCorruptionEffects(){
   if(corruptionLevel <= 0) return;
   ctx.save();
+  
+  // Color inversion zones (stronger at higher corruption)
+  if(corruptionLevel > 0.1){
+    ctx.globalAlpha = corruptionLevel * 0.12;
+    ctx.globalCompositeOperation = 'screen';  // inverted blend mode
+    
+    // Invert random sections of the screen
+    for(let i = 0; i < corruptionLevel * 6; i++){
+      const invX = Math.floor(Math.random() * (W / 60)) * 60;
+      const invY = Math.floor(Math.random() * (H / 60)) * 60;
+      const invW = 60 + Math.random() * 80;
+      const invH = 60 + Math.random() * 80;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(invX, invY, invW, invH);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
   
   // Chromatic aberration (color shift)
   const aberration = corruptionLevel * 3;
