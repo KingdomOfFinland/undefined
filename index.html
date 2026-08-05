@@ -323,12 +323,27 @@
     }
   };
  
-  window.__fetchTopCurrency = async function(n=10){
+  window.__fetchTopCurrency = async function(n=5){
     try{
       const curRef = ref(db, 'currency');
       const snap = await get(curRef);
       const rows = [];
-      snap.forEach(child => rows.push(child.val()));
+      snap.forEach(child => {
+        const v = child.val();
+        // Coerce every field to a real number — the same defensive fix used
+        // for the score leaderboard above. A single malformed/missing field
+        // (undefined, a string, etc.) turns the comparator below into NaN,
+        // which Array.sort() doesn't reject or reorder — it just leaves those
+        // rows roughly where the snapshot handed them to us, which looks like
+        // "whoever synced most recently" instead of an actual richest-first
+        // ranking.
+        rows.push({
+          name: v.name || '???',
+          coins: Number(v.coins) || 0,
+          cash: Number(v.cash) || 0,
+          nuggets: Number(v.nuggets) || 0
+        });
+      });
       // net worth ranking: cash is the rarest/most valuable, then coins, then nuggets
       rows.sort((a,b)=> (b.cash*100 + b.coins + b.nuggets*0.5) - (a.cash*100 + a.coins + a.nuggets*0.5));
       return rows.slice(0, n);
@@ -392,7 +407,7 @@
       <ul id="lbList"><li>Loading...</li></ul>
     </div>
     <div class="lbCorner lbCornerRight">
-      <h2 style="color:#ffd23d;">RICHEST PILOTS 🪙💵🐔</h2>
+      <h2 style="color:#ffd23d;">RICHEST PILOTS — TOP 5 🪙💵🐔</h2>
       <ul id="curLbList"><li>Loading...</li></ul>
     </div>
     <div id="flagSection" style="display:none;">
@@ -2482,12 +2497,12 @@ function renderCurrencyLeaderboard(rows){
   const el = document.getElementById('curLbList');
   if(!el) return;
   if(!rows.length){ el.innerHTML = '<li>No pilots yet — be the first</li>'; return; }
-  el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>🪙${r.coins||0} 💵${r.cash||0} 🐔${r.nuggets||0}</span></li>`).join('');
+  el.innerHTML = rows.slice(0,5).map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>🪙${r.coins||0} 💵${r.cash||0} 🐔${r.nuggets||0}</span></li>`).join('');
 }
  
 async function loadCurrencyLeaderboard(){
   if(!window.__fetchTopCurrency){ setTimeout(loadCurrencyLeaderboard, 300); return; }
-  const rows = await window.__fetchTopCurrency(10);
+  const rows = await window.__fetchTopCurrency(5);
   renderCurrencyLeaderboard(rows);
 }
  
@@ -2550,7 +2565,7 @@ function gameOver(){
       <ul id="lbList"><li>Loading...</li></ul>
     </div>
     <div class="lbCorner lbCornerRight">
-      <h2 style="color:#ffd23d;">RICHEST PILOTS 🪙💵🐔</h2>
+      <h2 style="color:#ffd23d;">RICHEST PILOTS — TOP 5 🪙💵🐔</h2>
       <ul id="curLbList"><li>Loading...</li></ul>
     </div>
     <div id="flagSection" style="display:none;">
