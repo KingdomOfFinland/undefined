@@ -667,6 +667,7 @@ function pollGamepad(){
  
 let running = false;
 let score = 0, wave = 1;
+let corruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
 let frame = 0;
 let shakeT = 0;
 let dyingTimer = 0;
@@ -1692,6 +1693,7 @@ let spawnTimer = 0;
 function startWave(w){
   spawnQueue = waveComposition(w).sort(()=>Math.random()-0.5);
   spawnTimer = 0;
+  corruptionLevel = Math.min(1, w / 30);  // full corruption at wave 30+
   SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
@@ -1778,8 +1780,14 @@ function updatePlayer(){
   if(gp){ mx += gp.mx; my += gp.my; }
   mx = clamp(mx,-1,1); my = clamp(my,-1,1);
   const len = Math.hypot(mx,my)||1;
-  player.x += (mx/len)*player.speed;
-  player.y += (my/len)*player.speed;
+  
+  // CORRUPTION MECHANIC: distort movement and slow at higher waves
+  const corruptionWarp = Math.sin(frame * 0.03 + corruptionLevel * 5) * corruptionLevel * 6;
+  const speedMult = 1 - corruptionLevel * 0.2;
+  const noisyX = corruptionLevel > 0 ? Math.sin(frame * 0.05 + player.y * 0.01) * corruptionLevel * 4 : 0;
+  
+  player.x += (mx/len)*player.speed*speedMult + corruptionWarp + noisyX;
+  player.y += (my/len)*player.speed*speedMult + corruptionWarp;
   player.x = clamp(player.x, 20, W-20);
   player.y = clamp(player.y, 20, H-20);
  
@@ -1947,6 +1955,14 @@ function updateEnemies(){
   for(const e of enemies){
     if(!e.alive) continue;
     e.phase += 0.05;
+    
+    // CORRUPTION: all enemies jitter/warp when corruption is high
+    if(corruptionLevel > 0.2){
+      const wobbleX = Math.sin(frame * 0.02 + e.phase) * corruptionLevel * 3;
+      const wobbleY = Math.cos(frame * 0.015 + e.phase) * corruptionLevel * 2;
+      e.x += wobbleX;
+      e.y += wobbleY;
+    }
 
     // Shield regen — generic so it'd apply to any future type with a
     // shieldMax, but today only Sentinel has one. Ticks down a grace timer
@@ -1971,7 +1987,12 @@ function updateEnemies(){
       }
     }
     else if(e.type==='fighter'){
-      const dx = player.x-e.x;
+      // CORRUPTION: fighters aim at random spots when corrupted
+      let targetX = player.x;
+      if(corruptionLevel > 0.3 && Math.random() < corruptionLevel * 0.2){
+        targetX = rand(60, W-60);  // glitch target
+      }
+      const dx = targetX - e.x;
       e.x += clamp(dx,-e.speed,e.speed);
       if(e.y < 140+Math.sin(e.phase)*30) e.y += e.speed;
       e.fireCd--;
@@ -2040,10 +2061,12 @@ function updateEnemies(){
       }
     }
     else if(e.type==='drone'){
-      if(!e.diving && e.y>120) e.diving = Math.random()<0.02;
+      if(!e.diving && e.y>120) e.diving = Math.random()<(0.02 + corruptionLevel*0.05);  // dive more when corrupted
       if(e.diving){
         let tgt = player;
-        if(player.commsJamT>0){
+        // CORRUPTION: drones lose target tracking at high corruption
+        const corruptionConfuse = Math.random() < corruptionLevel * 0.15;
+        if(player.commsJamT>0 || corruptionConfuse){
           if(!e.confusedTarget || !e.confusedTarget.alive || frame % 50 === 0){
             const candidates = enemies.filter(en=>en.alive && en!==e);
             e.confusedTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
@@ -2053,8 +2076,9 @@ function updateEnemies(){
           e.confusedTarget = null;
         }
         const ang = Math.atan2(tgt.y-e.y, tgt.x-e.x);
-        e.x += Math.cos(ang)*e.speed*1.4;
-        e.y += Math.sin(ang)*e.speed*1.4;
+        const glitchAngle = corruptionLevel * Math.sin(frame * 0.1) * 0.3;  // angle wobble
+        e.x += Math.cos(ang + glitchAngle)*e.speed*1.4;
+        e.y += Math.sin(ang + glitchAngle)*e.speed*1.4;
       } else {
         e.y += e.speed*0.6;
         e.x += Math.sin(e.phase)*1.5;
@@ -2448,6 +2472,41 @@ function drawStars(){
   }
 }
  
+function renderCorruptionEffects(){
+  if(corruptionLevel <= 0) return;
+  ctx.save();
+  
+  // Chromatic aberration (color shift)
+  const aberration = corruptionLevel * 3;
+  ctx.globalAlpha = corruptionLevel * 0.08;
+  ctx.fillStyle = '#ff00ff';
+  ctx.fillRect(-aberration, 0, W+aberration*2, H);
+  ctx.fillStyle = '#00ffff';
+  ctx.fillRect(aberration, 0, W-aberration*2, H);
+  
+  // Scanline flicker
+  ctx.globalAlpha = corruptionLevel * 0.15;
+  for(let i = 0; i < H; i += 6){
+    if(Math.random() < corruptionLevel * 0.4){
+      ctx.fillStyle = `rgba(255, 100, 255, ${Math.random() * 0.3})`;
+      ctx.fillRect(0, i, W, 2);
+    }
+  }
+  
+  // Random pixel glitch blocks
+  if(corruptionLevel > 0.4){
+    ctx.globalAlpha = corruptionLevel * 0.1;
+    for(let i = 0; i < corruptionLevel * 8; i++){
+      const gx = Math.floor(Math.random() * (W / 40)) * 40;
+      const gy = Math.floor(Math.random() * (H / 40)) * 40;
+      ctx.fillStyle = Math.random() > 0.5 ? '#ff00ff' : '#00ffff';
+      ctx.fillRect(gx, gy, 40, 40);
+    }
+  }
+  
+  ctx.restore();
+}
+
 function render(){
   ctx.save();
   ctx.scale(renderScale, renderScale);
@@ -2468,6 +2527,7 @@ function render(){
   drawPlayer();
   drawParticles();
   drawBuffHud();
+  renderCorruptionEffects();  // overlay glitch effects on top
   ctx.restore();
 }
  
