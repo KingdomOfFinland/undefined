@@ -891,6 +891,34 @@ const SHIP_SKINS = [
     ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#ff2fd6'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
     drawThruster(ctx,th,'rgba(255,47,214,0.85)');
+  }},
+  { id:'infinity_insight', name:'Infinity In-Sight', unlock:{type:'wave', value:314}, exclusive:true,
+    unlockDesc:"You've seen the glitches, they're gone, or are they? Keep going m8.", draw(ctx,th){
+    // chromatic-split hull — a lingering echo of the corruption zone
+    ctx.save();
+    ctx.globalAlpha=0.55; ctx.fillStyle='#ff2bff';
+    ctx.beginPath();
+    ctx.moveTo(-2,-20); ctx.lineTo(8,10); ctx.lineTo(2,8); ctx.lineTo(2,18);
+    ctx.lineTo(-6,18); ctx.lineTo(-6,8); ctx.lineTo(-12,10);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#00ffff';
+    ctx.beginPath();
+    ctx.moveTo(2,-20); ctx.lineTo(12,10); ctx.lineTo(6,8); ctx.lineTo(6,18);
+    ctx.lineTo(-2,18); ctx.lineTo(-2,8); ctx.lineTo(-8,10);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle='#e8e8ff'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=1.6;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // infinity-symbol cockpit marking
+    ctx.strokeStyle='#00ffff'; ctx.lineWidth=1.4;
+    ctx.beginPath();
+    ctx.arc(-3,-2,3,0,Math.PI*2); ctx.arc(3,-2,3,0,Math.PI*2);
+    ctx.stroke();
+    ctx.fillStyle='#e8e8ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(255,255,255,0.85)');
   }}
 ];
  
@@ -1439,7 +1467,7 @@ function getSkinById(list, id){
 const player = {
   x: W/2, y: H-90, vx:0, vy:0, angle:-Math.PI/2,
   w: 34, h: 30, speed: 5.8,
-  hp: 100, maxHp: 100,
+  hp: 150, maxHp: 150,
   fireCd: 0,
   flares: 3, flareCd: 0,
   lockTarget: null, lockProgress: 0,
@@ -1774,44 +1802,44 @@ function spawnEnemy(type){
   const base = { type, x: rand(60,W-60), y: -50, hp:1, maxHp:1, alive:true,
     fireCd: rand(30,90), angle: Math.PI/2, phase: rand(0,Math.PI*2) };
   if(type==='ufo'){
-    Object.assign(base,{ hp:20, maxHp:20, w:36,h:16, speed:2.2, scoreVal:150 });
+    Object.assign(base,{ hp:27, maxHp:27, w:36,h:16, speed:2.2, scoreVal:150 });
   } else if(type==='fighter'){
-    Object.assign(base,{ hp:15, maxHp:15, w:26,h:22, speed:3, scoreVal:100, missileCd: rand(120,240) });
+    Object.assign(base,{ hp:20, maxHp:20, w:26,h:22, speed:3, scoreVal:100, missileCd: rand(120,240) });
   } else if(type==='bomber'){
-    Object.assign(base,{ hp:40, maxHp:40, w:46,h:26, speed:1.2, scoreVal:250, bombCd: rand(90,160) });
+    Object.assign(base,{ hp:54, maxHp:54, w:46,h:26, speed:1.2, scoreVal:250, bombCd: rand(90,160) });
   } else if(type==='spaceship'){
-    Object.assign(base,{ hp:120, maxHp:120, w:70,h:50, speed:0.7, scoreVal:600, laserCd:150, laserT:0 });
+    Object.assign(base,{ hp:162, maxHp:162, w:70,h:50, speed:0.7, scoreVal:600, laserCd:150, laserT:0 });
   } else if(type==='carrier'){
-    Object.assign(base,{ hp:150, maxHp:150, w:90,h:40, speed:0.5, scoreVal:600, launchCd: rand(150,220), fireCd: rand(60,100) });
+    Object.assign(base,{ hp:203, maxHp:203, w:90,h:40, speed:0.5, scoreVal:600, launchCd: rand(150,220), fireCd: rand(60,100) });
   } else if(type==='drone'){
-    Object.assign(base,{ hp:10, maxHp:10, w:22,h:22, speed:2.6, scoreVal:80, diving:false });
+    Object.assign(base,{ hp:14, maxHp:14, w:22,h:22, speed:2.6, scoreVal:80, diving:false });
   } else if(type==='sentinel'){
     // Tanky/shielded — shieldHp soaks all damage first and only regenerates
     // after a gap in incoming hits (see updateEnemies), so it takes sustained
     // fire to actually crack the shield and start hitting the hull.
-    Object.assign(base,{ hp:128, maxHp:128, w:56,h:36, speed:0.55, scoreVal:450,
-      fireCd: rand(60,110), shieldHp:256, shieldMax:256, shieldHitTimer:0 });
+    Object.assign(base,{ hp:173, maxHp:173, w:56,h:36, speed:0.55, scoreVal:450,
+      fireCd: rand(60,110), shieldHp:346, shieldMax:346, shieldHitTimer:0 });
   } else if(type==='glitch_entity'){
     // BOSS: Sniper with heat-seeking missile
-    Object.assign(base,{ hp:250, maxHp:250, w:48,h:48, speed:1.8, scoreVal:1500,
-      fireCd: rand(80,140), shieldHp:150, shieldMax:150, shieldHitTimer:0, isBoss:true });
+    Object.assign(base,{ hp:473, maxHp:473, w:48,h:48, speed:1.8, scoreVal:1500,
+      fireCd: rand(80,140), shieldHp:284, shieldMax:284, shieldHitTimer:0, isBoss:true });
   } else if(type==='nexus_core'){
     // BOSS: Rapid fire like Bandkanon
-    Object.assign(base,{ hp:300, maxHp:300, w:52,h:52, speed:1.2, scoreVal:1500,
-      fireCd: 8, shieldHp:175, shieldMax:175, shieldHitTimer:0, isBoss:true });
+    Object.assign(base,{ hp:567, maxHp:567, w:52,h:52, speed:1.2, scoreVal:1500,
+      fireCd: 8, shieldHp:330, shieldMax:330, shieldHitTimer:0, isBoss:true });
   } else if(type==='phantom_carrier'){
     // BOSS: 2.5x carrier with beam attacks
-    Object.assign(base,{ hp:375, maxHp:375, w:225,h:100, speed:0.4, scoreVal:1500,
-      launchCd: rand(150,220), fireCd: 20, shieldHp:75, shieldMax:75, shieldHitTimer:0, 
+    Object.assign(base,{ hp:708, maxHp:708, w:225,h:100, speed:0.4, scoreVal:1500,
+      launchCd: rand(150,220), fireCd: 20, shieldHp:141, shieldMax:141, shieldHitTimer:0, 
       laserCd:80, laserT:0, isBoss:true });
   } else if(type==='void_sentinel'){
     // BOSS: 2x enhanced Sentinel
-    Object.assign(base,{ hp:256, maxHp:256, w:80,h:60, speed:0.45, scoreVal:1500,
-      fireCd: rand(50,90), shieldHp:512, shieldMax:512, shieldHitTimer:0, isBoss:true });
+    Object.assign(base,{ hp:484, maxHp:484, w:80,h:60, speed:0.45, scoreVal:1500,
+      fireCd: rand(50,90), shieldHp:967, shieldMax:967, shieldHitTimer:0, isBoss:true });
   } else if(type==='mothership'){
     // BOSS: Ultimate boss — 5x carrier size, dual beam, heavy firepower
-    Object.assign(base,{ hp:1000, maxHp:1000, w:450,h:200, speed:0.35, scoreVal:2000,
-      launchCd: rand(120,200), fireCd: 15, shieldHp:450, shieldMax:450, shieldHitTimer:0,
+    Object.assign(base,{ hp:1890, maxHp:1890, w:450,h:200, speed:0.35, scoreVal:2000,
+      launchCd: rand(120,200), fireCd: 15, shieldHp:851, shieldMax:851, shieldHitTimer:0,
       laserCd:60, laserT:0, laserCount:2, missileCount:0, isBoss:true });
   }
   enemies.push(base);
@@ -1845,7 +1873,7 @@ function startWave(w){
   spawnQueue = waveComposition(w).sort(()=>Math.random()-0.5);
   spawnTimer = 0;
   // CORRUPTION: starts at wave 192, fully corrupted by wave 256
-  corruptionLevel = w < 192 ? 0 : Math.min(1, (w - 192) / (256 - 192));
+  corruptionLevel = (w < 192 || w >= 314) ? 0 : Math.min(1, (w - 192) / (256 - 192));
   SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
@@ -2191,7 +2219,7 @@ function updateEnemies(){
         SFX.bombDrop();
         enemies.push({
           type:'drone', x:clamp(e.x+rand(-30,30),40,W-40), y:e.y+20,
-          hp:10, maxHp:10, w:22,h:22, speed:2.6, scoreVal:80, alive:true,
+          hp:14, maxHp:14, w:22,h:22, speed:2.6, scoreVal:80, alive:true,
           fireCd:rand(30,90), angle:Math.PI/2, phase:rand(0,Math.PI*2), diving:false
         });
       }
@@ -2301,7 +2329,7 @@ function updateEnemies(){
         SFX.bombDrop();
         enemies.push({
           type:'drone', x:clamp(e.x+rand(-50,50),40,W-40), y:e.y+30,
-          hp:10, maxHp:10, w:22,h:22, speed:2.6, scoreVal:80, alive:true,
+          hp:14, maxHp:14, w:22,h:22, speed:2.6, scoreVal:80, alive:true,
           fireCd:rand(30,90), angle:Math.PI/2, phase:rand(0,Math.PI*2), diving:false
         });
       }
@@ -3044,7 +3072,7 @@ async function resetGame(){
   score=0; wave=1;
   dyingTimer = 0;
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
-  player.hp=100; player.x=W/2; player.y=H-90;
+  player.hp=player.maxHp; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
