@@ -1155,6 +1155,118 @@ const ENEMY_SKINS = {
       ctx.lineTo(w*0.5,h); ctx.lineTo(-w*0.5,h); ctx.lineTo(-w,0);
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }}
+  ],
+  glitch_entity: [
+    { id:'default', name:'Glitch Entity', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,60,255,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+10,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.save();
+      ctx.rotate(e.phase*0.3);
+      ctx.fillStyle = '#1a0a1a'; ctx.strokeStyle = '#ff2bff';
+      ctx.lineWidth = 2;
+      const w=e.w/2, h=e.h/2;
+      ctx.beginPath();
+      ctx.moveTo(0,-h); ctx.lineTo(w,0); ctx.lineTo(0,h); ctx.lineTo(-w,0);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ff2bff';
+      ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  nexus_core: [
+    { id:'default', name:'Nexus Core', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,180,40,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+10,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle = '#3a2a0a'; ctx.strokeStyle = '#ffb428';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0,0,e.w/2,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      // spinning inner ring for the rapid-fire cannon look
+      ctx.save();
+      ctx.rotate(-e.phase*1.5);
+      ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0,0,e.w/2-8,0,Math.PI*1.4); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(0,0,7,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  phantom_carrier: [
+    { id:'default', name:'Phantom Carrier', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(140,80,255,${0.25+0.35*shieldPct})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+14,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.85;  // ghostly/phantom look
+      ctx.fillStyle = '#241a3a'; ctx.strokeStyle = '#9f6cff';
+      ctx.lineWidth = 2;
+      const w=e.w/2, h=e.h/2;
+      ctx.beginPath();
+      ctx.moveTo(-w,0); ctx.lineTo(-w+30,-h); ctx.lineTo(w-30,-h);
+      ctx.lineTo(w,0); ctx.lineTo(w-30,h); ctx.lineTo(-w+30,h);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#9f6cff'; ctx.beginPath(); ctx.arc(0,0,14,0,Math.PI*2); ctx.fill();
+      if(e.laserT>0){
+        ctx.fillStyle = 'rgba(200,150,255,0.6)';
+        ctx.fillRect(-4,h,8,600);
+      }
+    }}
+  ],
+  void_sentinel: [
+    { id:'default', name:'Void Sentinel', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(120,0,255,${0.35+0.4*shieldPct})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+12,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle = e.shieldHp>0 ? '#150a2e' : '#2e0a0a';
+      ctx.strokeStyle = e.shieldHp>0 ? '#8f2bff' : '#ff6b6b';
+      ctx.lineWidth = 3;
+      const w=e.w/2, h=e.h/2;
+      ctx.beginPath();
+      ctx.moveTo(-w*0.5,-h); ctx.lineTo(w*0.5,-h); ctx.lineTo(w,0);
+      ctx.lineTo(w*0.5,h); ctx.lineTo(-w*0.5,h); ctx.lineTo(-w,0);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#8f2bff'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  mothership: [
+    { id:'default', name:'The Mothership', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,40,60,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+18,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle = '#241012'; ctx.strokeStyle = '#ff2b3f';
+      ctx.lineWidth = 3;
+      const w=e.w/2, h=e.h/2;
+      ctx.beginPath();
+      ctx.moveTo(-w,0); ctx.lineTo(-w+60,-h); ctx.lineTo(w-60,-h);
+      ctx.lineTo(w,0); ctx.lineTo(w-60,h); ctx.lineTo(-w+60,h);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // twin beam emitters
+      ctx.fillStyle = '#ff2b3f';
+      ctx.beginPath(); ctx.arc(-80,0,16,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(80,0,16,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffcc33';
+      ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
+      if(e.laserT>0){
+        ctx.fillStyle = 'rgba(255,70,90,0.6)';
+        ctx.fillRect(-84,h,8,600);
+        ctx.fillRect(76,h,8,600);
+      }
+    }}
   ]
 };
  
@@ -1469,7 +1581,12 @@ const ENEMY_EXPLOSION_COLORS = {
   spaceship: ['#5ecbff', '#ff4d6d'],
   carrier: ['#6bff8f', '#ffe066'],
   drone: ['#ff4d4d', '#cfd4ff'],
-  sentinel: ['#4ecdff', '#ff6b6b']
+  sentinel: ['#4ecdff', '#ff6b6b'],
+  glitch_entity: ['#ff2bff', '#00ffff'],
+  nexus_core: ['#ffb428', '#ffe066'],
+  phantom_carrier: ['#9f6cff', '#c9a5ff'],
+  void_sentinel: ['#8f2bff', '#ff2b6b'],
+  mothership: ['#ff2b3f', '#ffcc33']
 };
 function explodeEnemy(e){
   const colors = ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
@@ -1511,7 +1628,11 @@ function maybeDropPowerup(e){
 }
  
 function awardKillCoins(e){
-  addCoins((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1);
+  if(e.isBoss){
+    addCoins(Math.round(rand(40, 60)));  // 50 coins ± 10
+  } else {
+    addCoins((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1);
+  }
 }
  
 function applyPowerup(type){
@@ -1670,6 +1791,28 @@ function spawnEnemy(type){
     // fire to actually crack the shield and start hitting the hull.
     Object.assign(base,{ hp:128, maxHp:128, w:56,h:36, speed:0.55, scoreVal:450,
       fireCd: rand(60,110), shieldHp:256, shieldMax:256, shieldHitTimer:0 });
+  } else if(type==='glitch_entity'){
+    // BOSS: Sniper with heat-seeking missile
+    Object.assign(base,{ hp:250, maxHp:250, w:48,h:48, speed:1.8, scoreVal:1500,
+      fireCd: rand(80,140), shieldHp:150, shieldMax:150, shieldHitTimer:0, isBoss:true });
+  } else if(type==='nexus_core'){
+    // BOSS: Rapid fire like Bandkanon
+    Object.assign(base,{ hp:300, maxHp:300, w:52,h:52, speed:1.2, scoreVal:1500,
+      fireCd: 8, shieldHp:175, shieldMax:175, shieldHitTimer:0, isBoss:true });
+  } else if(type==='phantom_carrier'){
+    // BOSS: 2.5x carrier with beam attacks
+    Object.assign(base,{ hp:375, maxHp:375, w:225,h:100, speed:0.4, scoreVal:1500,
+      launchCd: rand(150,220), fireCd: 20, shieldHp:75, shieldMax:75, shieldHitTimer:0, 
+      laserCd:80, laserT:0, isBoss:true });
+  } else if(type==='void_sentinel'){
+    // BOSS: 2x enhanced Sentinel
+    Object.assign(base,{ hp:256, maxHp:256, w:80,h:60, speed:0.45, scoreVal:1500,
+      fireCd: rand(50,90), shieldHp:512, shieldMax:512, shieldHitTimer:0, isBoss:true });
+  } else if(type==='mothership'){
+    // BOSS: Ultimate boss — 5x carrier size, dual beam, heavy firepower
+    Object.assign(base,{ hp:1000, maxHp:1000, w:450,h:200, speed:0.35, scoreVal:2000,
+      launchCd: rand(120,200), fireCd: 15, shieldHp:450, shieldMax:450, shieldHitTimer:0,
+      laserCd:60, laserT:0, laserCount:2, missileCount:0, isBoss:true });
   }
   enemies.push(base);
 }
@@ -1685,6 +1828,14 @@ function waveComposition(w){
   if(w%4===0) list.push('spaceship');
   if(w>=6 && w%6===0) list.push('carrier');
   if(w>=5 && w%5===0) list.push('sentinel');
+  
+  // BOSS WAVES (192+)
+  if(w===192) list.push('glitch_entity');
+  if(w===200) list.push('nexus_core');
+  if(w===208) list.push('phantom_carrier');
+  if(w===216) list.push('void_sentinel');
+  if(w>=100 && w%100===0) list.push('mothership');
+  
   return list;
 }
  
@@ -1740,10 +1891,13 @@ const HEATSEEK_BULLET_RESIST = 0.25;  // takes 25% less damage per bullet hit
 const PLAYER_BULLET_DAMAGE = 8;       // matches standard bullet damage vs enemies
  
 function makeMissile(base, isPlayerSide){
-  const chance = isPlayerSide ? HEATSEEK_PLAYER_CHANCE : HEATSEEK_ENEMY_CHANCE;
-  const heatseeking = Math.random() < chance;
-  if(heatseeking){
-    base.heatseeking = true;
+  // Respect an explicitly-set heatseeking flag (used by bosses that need
+  // guaranteed or capped heat-seeking counts) instead of always rerolling.
+  if(base.heatseeking === undefined){
+    const chance = isPlayerSide ? HEATSEEK_PLAYER_CHANCE : HEATSEEK_ENEMY_CHANCE;
+    base.heatseeking = Math.random() < chance;
+  }
+  if(base.heatseeking && base.hp === undefined){
     base.hp = HEATSEEK_HP;
   }
   return base;
@@ -2088,6 +2242,143 @@ function updateEnemies(){
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*3.2,vy:Math.sin(ang)*3.2,w:5,h:5,side:'enemy'});
       }
     }
+    // ===================== BOSSES =====================
+    else if(e.type==='glitch_entity'){
+      // Sniper boss: slow drift, precise 2-bullet burst + 1 heat-seeking missile
+      if(e.y<130) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.25)*1.4;
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = rand(90,130);
+        SFX.enemyShoot();
+        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        // precise sniper burst — 2 bullets, tight spread, fast
+        for(let i=-1;i<=1;i+=2){
+          const spread = i*0.05;
+          enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang+spread)*7,vy:Math.sin(ang+spread)*7,w:5,h:5,side:'enemy'});
+        }
+      }
+      e.missileCd = e.missileCd===undefined ? rand(180,240) : e.missileCd-1;
+      if(e.missileCd<=0){
+        e.missileCd = rand(220,300);
+        SFX.missileLaunch();
+        missiles.push(makeMissile({
+          x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.5,turn:0.06,life:340,w:5,h:10,
+          spawnGrace:15, heatseeking:true, hp:HEATSEEK_HP  // always heat-seeking
+        }, false));
+      }
+    }
+    else if(e.type==='nexus_core'){
+      // Bandkanon-style boss: absurdly fast fire rate, minimal movement
+      if(e.y<130) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.2)*1.0;
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = 8;  // Bandkanon 1 fire rate
+        SFX.enemyShoot();
+        const ang = Math.atan2(player.y-e.y, player.x-e.x) + rand(-0.15,0.15);
+        enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
+      }
+    }
+    else if(e.type==='phantom_carrier'){
+      // 2.5x carrier — same launch pattern, tripled beam damage/duration
+      if(e.y<100) e.y+=e.speed;
+      e.x += Math.sin(e.phase*0.25)*0.7;
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = rand(130,180);
+        SFX.missileLaunch();
+        for(let i=-1;i<=1;i++){
+          missiles.push(makeMissile({
+            x:e.x+i*30, y:e.y+16, vx:i*0.8, vy:3, side:'enemy',
+            speed:4, turn:0.04, life:300, w:5,h:10, spawnGrace:15
+          }, false));
+        }
+      }
+      e.launchCd--;
+      if(e.launchCd<=0 && enemies.length<40){
+        e.launchCd = rand(160,230);
+        SFX.bombDrop();
+        enemies.push({
+          type:'drone', x:clamp(e.x+rand(-50,50),40,W-40), y:e.y+30,
+          hp:10, maxHp:10, w:22,h:22, speed:2.6, scoreVal:80, alive:true,
+          fireCd:rand(30,90), angle:Math.PI/2, phase:rand(0,Math.PI*2), diving:false
+        });
+      }
+      e.laserCd--;
+      if(e.laserCd<=0){
+        e.laserT = 40;
+        e.laserCd = 200;
+        SFX.laser();
+      }
+      if(e.laserT>0){
+        e.laserT--;
+        if(Math.abs(e.x-player.x)<24 && e.laserT%3===0){
+          if(damagePlayer(4.5)) shakeT=6;  // 3x the standard beam damage (1.5 -> 4.5)
+        }
+      }
+    }
+    else if(e.type==='void_sentinel'){
+      // Heavily upgraded Sentinel — same pattern, hits harder & more often
+      if(e.y<150) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.35)*0.7;
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = rand(45,80);
+        SFX.enemyShoot();
+        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:6,h:6,side:'enemy'});
+      }
+    }
+    else if(e.type==='mothership'){
+      // The ultimate boss: 2 beams, 8 bullets, 4 missiles (max 1 heat-seeking)
+      if(e.y<160) e.y+=e.speed;
+      e.x += Math.sin(e.phase*0.15)*0.5;
+
+      // Bullet barrage — 8 bullets in a fan
+      e.fireCd--;
+      if(e.fireCd<=0){
+        e.fireCd = 15;
+        SFX.enemyShoot();
+        const baseAng = Math.atan2(player.y-e.y, player.x-e.x);
+        for(let i=0;i<8;i++){
+          const spread = (i-3.5) * 0.09;
+          enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*4.5,vy:Math.sin(baseAng+spread)*4.5,w:5,h:5,side:'enemy'});
+        }
+      }
+
+      // Missile salvo — 4 missiles, only 1 allowed to be heat-seeking
+      e.missileCd = e.missileCd===undefined ? rand(160,220) : e.missileCd-1;
+      if(e.missileCd<=0){
+        e.missileCd = rand(240,320);
+        SFX.missileLaunch();
+        const heatIdx = Math.floor(rand(0,4));  // pick one slot to be the heat-seeker
+        for(let i=0;i<4;i++){
+          const isHeat = i===heatIdx;
+          missiles.push(makeMissile({
+            x:e.x+(i-1.5)*40, y:e.y+30, vx:(i-1.5)*0.6, vy:3, side:'enemy',
+            speed: isHeat?4.5:3.8, turn: isHeat?0.06:0.035, life:320, w:5,h:10,
+            spawnGrace:15, heatseeking:isHeat, hp: isHeat?HEATSEEK_HP:undefined
+          }, false));
+        }
+      }
+
+      // Dual beams
+      e.laserCd--;
+      if(e.laserCd<=0){
+        e.laserT = 50;
+        e.laserCd = 180;
+        SFX.laser();
+      }
+      if(e.laserT>0){
+        e.laserT--;
+        for(const off of [-80, 80]){  // two beam positions
+          if(Math.abs((e.x+off)-player.x)<24 && e.laserT%3===0){
+            if(damagePlayer(2.5)) shakeT=8;
+          }
+        }
+      }
+    }
 
     if(e.y>H+60) e.alive=false;
   }
@@ -2101,11 +2392,12 @@ function addScore(amount){
   killsThisRun++;
   const now = performance.now();
  
-  // condition: single gain over 600 (max legit single kill is the 600-pt spaceship boss)
-  // checked against the base amount so the SCORE x2 power-up doesn't trip this
-  if(amount > 600){
+  // condition: single gain over 2000 (max legit single kill is the 2000-pt
+  // Mothership boss) — checked against the base amount so the SCORE x2
+  // power-up doesn't trip this
+  if(amount > 2000){
     cheatFlagged = true;
-    cheatReason = 'DEVTOOLS/HACK USED (single gain > 600)';
+    cheatReason = 'DEVTOOLS/HACK USED (single gain > 2000)';
   }
  
   const finalAmount = player.scoreMultT>0 ? amount*2 : amount;
