@@ -3752,6 +3752,15 @@ function openSkinsScreen(){
     card.appendChild(previewCanvas);
     card.appendChild(nameEl);
  
+    if(unlocked && skin.unlockDesc){
+      const flavor = document.createElement('div');
+      flavor.className = 'skinReq';
+      flavor.style.opacity = '0.75';
+      flavor.style.fontStyle = 'italic';
+      flavor.textContent = skin.unlockDesc;
+      card.appendChild(flavor);
+    }
+ 
     if(isEquipped){
       const tag = document.createElement('div');
       tag.className = 'skinEquippedTag';
