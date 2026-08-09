@@ -219,10 +219,23 @@
     padding:6px 12px; font-weight:normal; box-shadow:none;
   }
   #touchToggleBtn:hover { background:#1a3a45; }
+
+  #authBar {
+    display:flex; align-items:center; gap:8px; font-size:11px; color:#8cf;
+    justify-content:center; flex-wrap:wrap;
+  }
+  #googleSignInBtn, #googleSignOutBtn {
+    background:#123; color:#8cf; border:1px solid #145; font-size:11px;
+    padding:6px 12px; font-weight:normal; box-shadow:none; display:flex;
+    align-items:center; gap:6px;
+  }
+  #googleSignInBtn:hover, #googleSignOutBtn:hover { background:#1a3a45; }
+  #authStatus { color:#5cff8a; }
+  #authStatus.signedout { color:#8cf; }
 </style>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
@@ -240,12 +253,15 @@
   const db = getDatabase(app);
   const auth = getAuth(app);
   window.__currentUid = null;
+  window.__currentUser = null;
  
   onAuthStateChanged(auth, (user) => {
     window.__currentUid = user ? user.uid : null;
+    window.__currentUser = user ? { uid: user.uid, name: user.displayName || null, email: user.email || null, photo: user.photoURL || null } : null;
     if(user){
       console.log('%c[SIGNED IN]', 'color:#0f8;font-weight:bold;', 'uid:', user.uid, 'email:', user.email);
     }
+    window.dispatchEvent(new CustomEvent('uf-authchanged', { detail: window.__currentUser }));
   });
  
   window.__adminSignIn = async function(){
@@ -259,6 +275,24 @@
       console.error('Sign-in failed', e);
       return null;
     }
+  };
+
+  // Player-facing Google sign-in — same provider, but this is the one the
+  // in-game "Sign in with Google" button calls. Kept separate from
+  // __adminSignIn so admin console usage stays unaffected by anything here.
+  window.__playerSignIn = async function(){
+    try{
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      return { uid: result.user.uid, name: result.user.displayName || null, email: result.user.email || null };
+    } catch(e){
+      console.error('Player sign-in failed', e);
+      return null;
+    }
+  };
+  window.__playerSignOut = async function(){
+    try{ await signOut(auth); return true; }
+    catch(e){ console.error('Sign-out failed', e); return false; }
   };
  
   window.__submitScore = async function(name, score, wave){
@@ -511,6 +545,10 @@
     <button id="skinsBtnStart">SKINS</button>
     <button id="dailyBtn">🎁 DAILY</button>
     <button id="touchToggleBtn">📱 Touch Controls: AUTO</button>
+    <div id="authBar">
+      <button id="googleSignInBtn">🔐 Sign in with Google</button>
+      <span id="authStatus" class="signedout"></span>
+    </div>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
       <ul id="lbList"><li>Loading...</li></ul>
@@ -847,6 +885,43 @@ function updateRotateHint(){
 }
 window.addEventListener('resize', updateRotateHint);
 window.addEventListener('orientationchange', updateRotateHint);
+
+// ---------- Player Google sign-in ----------
+// Separate from the admin console flow — this is what the in-game button
+// and the score-submit prompt use. Leaderboard/currency writes require
+// auth != null server-side, so signing in is what actually lets a run
+// count.
+let currentUser = null;
+if(window.__currentUser) currentUser = window.__currentUser;
+window.addEventListener('uf-authchanged', (e) => {
+  currentUser = e.detail || null;
+  wireAuthBar();
+});
+async function doPlayerSignIn(){
+  if(!window.__playerSignIn){ return null; }
+  const btn = document.getElementById('googleSignInBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Signing in...'; }
+  const user = await window.__playerSignIn();
+  if(btn) btn.disabled = false;
+  return user;
+}
+function wireAuthBar(){
+  const btn = document.getElementById('googleSignInBtn');
+  const status = document.getElementById('authStatus');
+  if(!btn || !status) return;
+  if(currentUser){
+    btn.textContent = '🔓 Sign out';
+    btn.onclick = async () => { SFX.uiClick(); await window.__playerSignOut(); };
+    status.textContent = `Signed in as ${currentUser.name || currentUser.email || 'Google account'}`;
+    status.classList.remove('signedout');
+  } else {
+    btn.textContent = '🔐 Sign in with Google';
+    btn.onclick = async () => { SFX.uiClick(); await doPlayerSignIn(); };
+    status.textContent = 'Not signed in — scores & currency won\'t save';
+    status.classList.add('signedout');
+  }
+}
+document.addEventListener('DOMContentLoaded', wireAuthBar);
 
 function setMobileControlsVisible(show){
   const el = document.getElementById('mobileControls');
@@ -3898,8 +3973,8 @@ async function loadCurrencyLeaderboard(){
  
 function syncCurrencyToServer(){
   const name = getUsername();
-  if(!name || !window.__submitCurrency) return;
-  window.__submitCurrency(name, getCoins(), getCash(), getNuggets());
+  if(!name || !window.__submitCurrency || !currentUser) return;
+  window.__submitCurrency(name, getCoins(), getCash(), getNuggets()).catch(()=>{});
 }
  
  
@@ -3951,6 +4026,10 @@ function gameOver(){
     <button id="submitScoreBtn">SUBMIT SCORE</button>
     <button id="restartBtn">RELAUNCH</button>
     <button id="skinsBtnGO">SKINS</button>
+    <div id="authBar">
+      <button id="googleSignInBtn">🔐 Sign in with Google</button>
+      <span id="authStatus" class="signedout"></span>
+    </div>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
       <ul id="lbList"><li>Loading...</li></ul>
@@ -3967,6 +4046,7 @@ function gameOver(){
   loadLeaderboard();
   loadCurrencyLeaderboard();
   loadFlagged();
+  wireAuthBar();
   document.getElementById('restartBtn').onclick = () => { SFX.uiClick(); resetGame(); };
   document.getElementById('skinsBtnGO').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
   document.getElementById('changeNameLink').onclick = (e) => {
@@ -3984,9 +4064,23 @@ function gameOver(){
   };
   document.getElementById('submitScoreBtn').onclick = async () => {
     SFX.uiClick();
+    const btn = document.getElementById('submitScoreBtn');
+    if(!currentUser){
+      btn.disabled = true; btn.textContent = 'SIGN IN TO SUBMIT...';
+      const user = await doPlayerSignIn();
+      if(!user){
+        btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
+        alert('Sign-in was cancelled or failed — score not submitted.');
+        return;
+      }
+      // currentUser gets set by the uf-authchanged event, but that can land
+      // a tick after this await resolves — set it directly too so the rest
+      // of this click doesn't race the event.
+      currentUser = user;
+      btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
+    }
     const nameEl = document.getElementById('nameInput');
     const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
-    const btn = document.getElementById('submitScoreBtn');
  
     // if this is a different name than the saved one, it needs to be claimed first
     if(name.toLowerCase() !== (getUsername()||'').toLowerCase()){
