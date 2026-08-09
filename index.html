@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Undefined Fighter</title>
 <style>
+  :root { --accent1:#0ff; --accent2:#00ffcc; --accent-glow:rgba(0,255,200,0.15); --accent-border:#1a4a5a; }
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
     background:#05060a; color:#c9f7ff; font-family:'Courier New', monospace;
@@ -13,7 +14,7 @@
   #wrap { position:relative; }
   canvas {
     background:radial-gradient(ellipse at 50% 30%, #0a1428 0%, #05060a 70%);
-    border:2px solid #1a4a5a; box-shadow:0 0 30px rgba(0,255,200,0.15);
+    border:2px solid var(--accent-border); box-shadow:0 0 30px var(--accent-glow);
     display:block;
     max-width:100vw; max-height:100vh;
     width:auto; height:auto;
@@ -21,11 +22,11 @@
   #hud {
     position:absolute; top:0; left:0; width:100%; padding:10px 16px;
     display:flex; justify-content:space-between; pointer-events:none;
-    font-size:14px; text-shadow:0 0 6px #00ffcc;
+    font-size:14px; text-shadow:0 0 6px var(--accent2);
   }
   #hud div { display:flex; flex-direction:column; gap:4px; }
   .bar-bg { width:160px; height:10px; background:#111; border:1px solid #0af; }
-  .bar-fill { height:100%; background:linear-gradient(90deg,#0af,#0f8); }
+  .bar-fill { height:100%; background:linear-gradient(90deg,var(--accent1),var(--accent2)); }
   .flarebar-fill { height:100%; background:linear-gradient(90deg,#fa0,#f60); }
   #lockind {
     position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
@@ -37,7 +38,7 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(0,0,0,0.85); text-align:center; gap:14px;
   }
-  #center h1 { font-size:32px; color:#0ff; text-shadow:0 0 12px #0ff; letter-spacing:2px; }
+  #center h1 { font-size:32px; color:var(--accent1); text-shadow:0 0 12px var(--accent1); letter-spacing:2px; }
   #center p { font-size:13px; color:#8cf; max-width:420px; line-height:1.6; }
   button {
     font-family:inherit; background:#0af; color:#001; border:none;
@@ -1351,6 +1352,17 @@ const ENEMY_SKINS = {
       ctx.moveTo(-e.w/2+2,-8); ctx.lineTo(-e.w/2+2,0);
       ctx.moveTo(e.w/2-2,-8); ctx.lineTo(e.w/2-2,0);
       ctx.stroke();
+    }},
+    { id:'red_baron', name:'Red Baron', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#c0281f'; ctx.strokeStyle='#ffd9d0'; ctx.lineWidth=1.4;
+      ctx.fillRect(-e.w/2,-2,e.w,4);
+      ctx.fillRect(-e.w/2+3,-9,e.w-6,3);
+      ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(5,10); ctx.lineTo(-5,10); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle='#7a140f'; ctx.beginPath();
+      ctx.moveTo(-e.w/2+2,-8); ctx.lineTo(-e.w/2+2,0);
+      ctx.moveTo(e.w/2-2,-8); ctx.lineTo(e.w/2-2,0);
+      ctx.stroke();
     }}
   ],
   uav: [
@@ -1364,6 +1376,18 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#3a4a3a'; ctx.strokeStyle='#8cff8c'; ctx.lineWidth=1.4;
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#8cff8c'; ctx.beginPath(); ctx.arc(0,-2,4,0,Math.PI*2); ctx.fill();
+      ctx.fillRect(-e.w/2-6,-1,6,2); ctx.fillRect(e.w/2,-1,6,2);
+    }},
+    { id:'stealth', name:'Stealth', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(100,100,120,${0.25+0.35*shieldPct})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+8,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle='#0c0c10'; ctx.strokeStyle='#3a3a44'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#4a4a55'; ctx.beginPath(); ctx.arc(0,-2,4,0,Math.PI*2); ctx.fill();
       ctx.fillRect(-e.w/2-6,-1,6,2); ctx.fillRect(e.w/2,-1,6,2);
     }}
   ],
@@ -1380,6 +1404,19 @@ const ENEMY_SKINS = {
       ctx.beginPath(); ctx.moveTo(-e.w*0.9,0); ctx.lineTo(e.w*0.9,0); ctx.stroke();
       ctx.restore();
       ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(0,-e.h/2-2,2.5,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'gunship', name:'Gunship', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#3a4530'; ctx.strokeStyle='#7a8a5a'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.ellipse(0,2,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillRect(e.w/2-2,0,10,3);
+      ctx.fillStyle='#222'; ctx.fillRect(-e.w/2-4,4,8,3); ctx.fillRect(e.w/2-4,4,8,3); // side gun pods
+      ctx.save();
+      ctx.translate(0,-e.h/2-2);
+      ctx.rotate(e.phase*4);
+      ctx.strokeStyle='rgba(220,255,180,0.7)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-e.w*0.9,0); ctx.lineTo(e.w*0.9,0); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle='#111'; ctx.beginPath(); ctx.arc(0,-e.h/2-2,2.5,0,Math.PI*2); ctx.fill();
     }}
   ],
   quadcopter: [
@@ -1396,6 +1433,19 @@ const ENEMY_SKINS = {
         ctx.beginPath(); ctx.arc(dx,dy,5+Math.sin(e.phase*6)*1.5,0,Math.PI*2); ctx.fill();
       }
       ctx.fillStyle='#e91e63'; ctx.beginPath(); ctx.arc(0,0,2,0,Math.PI*2); ctx.fill();
+    }},
+    { id:'neon', name:'Neon', unlock:{type:'default'}, draw(ctx,e){
+      ctx.strokeStyle='#1a0a22'; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,-e.h/2); ctx.lineTo(e.w/2,e.h/2);
+      ctx.moveTo(e.w/2,-e.h/2); ctx.lineTo(-e.w/2,e.h/2);
+      ctx.stroke();
+      ctx.fillStyle='#2a0a33'; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,80,255,0.6)';
+      for(const [dx,dy] of [[-e.w/2,-e.h/2],[e.w/2,-e.h/2],[-e.w/2,e.h/2],[e.w/2,e.h/2]]){
+        ctx.beginPath(); ctx.arc(dx,dy,5+Math.sin(e.phase*6)*1.5,0,Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle='#7cf9ff'; ctx.beginPath(); ctx.arc(0,0,2,0,Math.PI*2); ctx.fill();
     }}
   ],
   blimp: [
@@ -1409,6 +1459,17 @@ const ENEMY_SKINS = {
       ctx.fillStyle='#c9b466'; ctx.strokeStyle='#8f7a30'; ctx.lineWidth=1.6;
       ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
       ctx.fillStyle='#8f7a30'; ctx.fillRect(-e.w/4,e.h/2-6,e.w/2,8);
+    }},
+    { id:'zeppelin', name:'Zeppelin', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(200,220,255,${0.25+0.35*shieldPct})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(0,0,(e.w/2)+8,(e.h/2)+6,0,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle='#b8bfc9'; ctx.strokeStyle='#5a6270'; ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#5a6270'; ctx.fillRect(-e.w/4,e.h/2-6,e.w/2,8);
     }}
   ],
   core2duo: [
@@ -1431,10 +1492,71 @@ const ENEMY_SKINS = {
         ctx.fillRect(i,-e.h/2-5,3,5);
         ctx.fillRect(i,e.h/2,3,5);
       }
+    }},
+    { id:'overclocked', name:'Overclocked', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,80,20,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+14,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle='#1a0805'; ctx.strokeStyle='#ff5014'; ctx.lineWidth=2;
+      ctx.fillRect(-e.w/2,-e.h/2,e.w,e.h); ctx.strokeRect(-e.w/2,-e.h/2,e.w,e.h);
+      ctx.fillStyle='#ff5014';
+      ctx.beginPath(); ctx.arc(-e.w/5,0,e.h/5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.w/5,0,e.h/5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ff9a3d';
+      for(let i=-e.w/2+6;i<e.w/2;i+=10){
+        ctx.fillRect(i,-e.h/2-5,3,5);
+        ctx.fillRect(i,e.h/2,3,5);
+      }
     }}
   ]
 };
  
+// DISPLAY CUSTOMIZATION — background theme, HUD accent color, explosion palette
+const BG_THEMES = {
+  default: { label:'Deep Space',  bg:'radial-gradient(ellipse at 50% 30%, #0a1428 0%, #05060a 70%)', star:'rgba(255,255,255,0.5)' },
+  crimson: { label:'Crimson',     bg:'radial-gradient(ellipse at 50% 30%, #280a14 0%, #0a0505 70%)', star:'rgba(255,170,170,0.5)' },
+  toxic:   { label:'Toxic',       bg:'radial-gradient(ellipse at 50% 30%, #0a2814 0%, #050a05 70%)', star:'rgba(170,255,170,0.5)' },
+  void:    { label:'Void',        bg:'radial-gradient(ellipse at 50% 30%, #180a28 0%, #05050a 70%)', star:'rgba(210,170,255,0.5)' }
+};
+const ACCENT_THEMES = {
+  cyan:    { label:'Cyan',    c1:'#0ff', c2:'#00ffcc', glow:'rgba(0,255,200,0.15)', border:'#1a4a5a' },
+  magenta: { label:'Magenta', c1:'#f0f', c2:'#ff33cc', glow:'rgba(255,0,200,0.15)', border:'#4a1a4a' },
+  gold:    { label:'Gold',    c1:'#fc3', c2:'#ffaa00', glow:'rgba(255,170,0,0.15)', border:'#4a3a1a' },
+  green:   { label:'Green',   c1:'#3f3', c2:'#33ff88', glow:'rgba(50,255,120,0.15)', border:'#1a4a2a' }
+};
+const EXPLOSION_THEMES = {
+  classic: { label:'Classic', colors:null }, // per-enemy default colors (ENEMY_EXPLOSION_COLORS)
+  mono:    { label:'Monochrome', colors:['#ffffff', '#aaaaaa'] },
+  toxic:   { label:'Toxic', colors:['#7cff3d', '#c9ff8f'] },
+  inferno: { label:'Inferno', colors:['#ff6a00', '#ffd23d'] }
+};
+let starColor = BG_THEMES.default.star;
+function getDisplaySettings(){
+  try { return Object.assign({bgTheme:'default',accent:'cyan',explosionTheme:'classic'}, JSON.parse(localStorage.getItem('uf_display'))||{}); }
+  catch(e){ return {bgTheme:'default',accent:'cyan',explosionTheme:'classic'}; }
+}
+function setDisplaySetting(key, value){
+  const s = getDisplaySettings();
+  s[key] = value;
+  localStorage.setItem('uf_display', JSON.stringify(s));
+  applyDisplaySettings();
+}
+function applyDisplaySettings(){
+  const s = getDisplaySettings();
+  const bg = BG_THEMES[s.bgTheme] || BG_THEMES.default;
+  const acc = ACCENT_THEMES[s.accent] || ACCENT_THEMES.cyan;
+  starColor = bg.star;
+  const canvasEl = document.getElementById('game');
+  if(canvasEl) canvasEl.style.background = bg.bg;
+  document.documentElement.style.setProperty('--accent1', acc.c1);
+  document.documentElement.style.setProperty('--accent2', acc.c2);
+  document.documentElement.style.setProperty('--accent-glow', acc.glow);
+  document.documentElement.style.setProperty('--accent-border', acc.border);
+}
+
 function getEquippedEnemySkin(type){
   return localStorage.getItem('uf_enemyskin_' + type) || 'default';
 }
@@ -1782,7 +1904,8 @@ const ENEMY_EXPLOSION_COLORS = {
   core2duo: ['#ffd700', '#fff2b0']
 };
 function explodeEnemy(e){
-  const colors = ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
+  const theme = EXPLOSION_THEMES[getDisplaySettings().explosionTheme] || EXPLOSION_THEMES.classic;
+  const colors = theme.colors || ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
   spawnParticles(e.x,e.y,colors[0],20,5,4.5);
   spawnParticles(e.x,e.y,colors[1],14,4,3.5);
   spawnParticles(e.x,e.y,'#fff',6,2.5,5);
@@ -1850,14 +1973,34 @@ const POWERUP_TYPES = [
   { id:'widerange',    weight:13, color:'#3dffb3', glyph:'W', label:'WIDE RANGE' }
 ];
  
+// LOADOUT CUSTOMIZATION — player can turn off specific powerup types from
+// ever dropping. Falls back to the full pool if everything's disabled so a
+// misconfigured loadout can't softlock powerup drops entirely.
+function getDisabledPowerups(){
+  try { return JSON.parse(localStorage.getItem('uf_disabled_powerups')) || []; }
+  catch(e){ return []; }
+}
+function setDisabledPowerups(list){
+  localStorage.setItem('uf_disabled_powerups', JSON.stringify(list));
+}
+function togglePowerupEnabled(id){
+  const disabled = getDisabledPowerups();
+  const idx = disabled.indexOf(id);
+  if(idx>=0) disabled.splice(idx,1); else disabled.push(id);
+  setDisabledPowerups(disabled);
+}
+
 function pickPowerupType(){
-  const total = POWERUP_TYPES.reduce((s,t)=>s+t.weight,0);
+  const disabled = getDisabledPowerups();
+  let pool = POWERUP_TYPES.filter(t => !disabled.includes(t.id));
+  if(!pool.length) pool = POWERUP_TYPES; // never fully lock the player out
+  const total = pool.reduce((s,t)=>s+t.weight,0);
   let r = Math.random()*total;
-  for(const t of POWERUP_TYPES){
+  for(const t of pool){
     if(r < t.weight) return t.id;
     r -= t.weight;
   }
-  return POWERUP_TYPES[0].id;
+  return pool[0].id;
 }
  
 // Only rolled from kills the player actually scored (see addScore call sites).
@@ -3204,7 +3347,7 @@ function drawLockLine(){
 }
  
 function drawStars(){
-  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.fillStyle=starColor;
   for(let i=0;i<60;i++){
     const sx = (i*97 + frame*0.6) % W;
     const sy = (i*53 + frame*1.4) % H;
@@ -4070,6 +4213,8 @@ function openSkinsScreen(){
   const categories = [
     { key:'abilities', label:'ABILITIES', abilities:true },
     { key:'blackmarket', label:'BLACK MARKET', blackmarket:true },
+    { key:'display', label:'DISPLAY', display:true },
+    { key:'loadout', label:'LOADOUT', loadout:true },
     { key:'ship', label:'SHIP', list:SHIP_SKINS },
     { key:'bullet', label:'BULLETS', list:BULLET_SKINS },
     { key:'missile', label:'MISSILES', list:MISSILE_SKINS },
@@ -4079,7 +4224,13 @@ function openSkinsScreen(){
     { key:'enemy_bomber', label:'BOMBER', list:ENEMY_SKINS.bomber, enemyType:'bomber' },
     { key:'enemy_spaceship', label:'CRUISER', list:ENEMY_SKINS.spaceship, enemyType:'spaceship' },
     { key:'enemy_carrier', label:'CARRIER', list:ENEMY_SKINS.carrier, enemyType:'carrier' },
-    { key:'enemy_drone', label:'DRONE', list:ENEMY_SKINS.drone, enemyType:'drone' }
+    { key:'enemy_drone', label:'DRONE', list:ENEMY_SKINS.drone, enemyType:'drone' },
+    { key:'enemy_biplane', label:'BIPLANE', list:ENEMY_SKINS.biplane, enemyType:'biplane' },
+    { key:'enemy_uav', label:'UAV', list:ENEMY_SKINS.uav, enemyType:'uav' },
+    { key:'enemy_helicopter', label:'HELICOPTER', list:ENEMY_SKINS.helicopter, enemyType:'helicopter' },
+    { key:'enemy_quadcopter', label:'DRONE-4', list:ENEMY_SKINS.quadcopter, enemyType:'quadcopter' },
+    { key:'enemy_blimp', label:'BLIMP', list:ENEMY_SKINS.blimp, enemyType:'blimp' },
+    { key:'enemy_core2duo', label:'CORE 2 DUO', list:ENEMY_SKINS.core2duo, enemyType:'core2duo' }
   ];
   let activeCat = 'abilities';
  
@@ -4618,6 +4769,79 @@ function openSkinsScreen(){
       return;
     }
  
+    if(cat.display){
+      const settings = getDisplaySettings();
+
+      function buildThemeRow(title, themes, settingKey){
+        const wrapDiv = document.createElement('div');
+        wrapDiv.style.cssText = 'grid-column:1/-1;text-align:left;margin:6px 0;';
+        const label = document.createElement('div');
+        label.style.cssText = 'font-size:11px;color:#8cf;letter-spacing:2px;margin-bottom:6px;';
+        label.textContent = title;
+        wrapDiv.appendChild(label);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+        Object.entries(themes).forEach(([id, def]) => {
+          const btn = document.createElement('button');
+          const active = settings[settingKey] === id;
+          btn.textContent = def.label + (active ? ' ✓' : '');
+          btn.style.cssText = `font-size:11px; padding:6px 12px; ${active ? '' : 'background:#234;color:#9cd;box-shadow:none;'}`;
+          btn.onclick = () => {
+            SFX.uiClick();
+            setDisplaySetting(settingKey, id);
+            renderGrid();
+          };
+          row.appendChild(btn);
+        });
+        wrapDiv.appendChild(row);
+        return wrapDiv;
+      }
+
+      gridEl.appendChild(buildThemeRow('BACKGROUND', BG_THEMES, 'bgTheme'));
+      gridEl.appendChild(buildThemeRow('HUD ACCENT COLOR', ACCENT_THEMES, 'accent'));
+      gridEl.appendChild(buildThemeRow('EXPLOSION STYLE', EXPLOSION_THEMES, 'explosionTheme'));
+      return;
+    }
+ 
+    if(cat.loadout){
+      const disabled = getDisabledPowerups();
+      const info = document.createElement('div');
+      info.style.cssText = 'grid-column:1/-1;text-align:left;font-size:11px;color:#9cd;margin-bottom:8px;';
+      info.textContent = 'Toggle off any powerups you don\'t want dropping during runs.';
+      gridEl.appendChild(info);
+
+      POWERUP_TYPES.forEach(t => {
+        const isOn = !disabled.includes(t.id);
+        const card = document.createElement('div');
+        card.className = 'skinCard' + (isOn ? ' equipped' : '');
+        card.style.padding = '10px';
+
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:40px;height:40px;margin:0 auto 6px;border-radius:8px;background:${t.color};box-shadow:0 0 10px ${t.color};display:flex;align-items:center;justify-content:center;font-weight:bold;color:#001;`;
+        icon.textContent = t.glyph;
+        card.appendChild(icon);
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = t.label;
+        card.appendChild(nameEl);
+
+        const tag = document.createElement('div');
+        tag.className = isOn ? 'skinEquippedTag' : 'skinReq';
+        tag.textContent = isOn ? 'ENABLED' : 'DISABLED — TAP TO ENABLE';
+        card.appendChild(tag);
+
+        card.onclick = () => {
+          SFX.uiClick();
+          togglePowerupEnabled(t.id);
+          renderGrid();
+        };
+
+        gridEl.appendChild(card);
+      });
+      return;
+    }
+ 
     const isEnemyCat = !!cat.enemyType;
  
     cat.list.filter(s => !s.exclusive).forEach(skin => {
@@ -4759,9 +4983,11 @@ const centerObserver = new MutationObserver(() => {
 document.addEventListener('DOMContentLoaded', () => {
   const center = document.getElementById('center');
   if(center) centerObserver.observe(center, { childList:true, subtree:true });
+  applyDisplaySettings();
 });
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
+  applyDisplaySettings();
 }
  
 </script>
