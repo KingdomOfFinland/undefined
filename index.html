@@ -379,6 +379,7 @@
       <span>HULL</span>
       <div class="bar-bg"><div class="bar-fill" id="hpbar" style="width:100%"></div></div>
       <span>FLARES: <span id="flarecount">3</span></span>
+      <span>NUKES: <span id="nukecount">0</span></span>
     </div>
     <div style="align-items:flex-end;">
       <span>SCORE: <span id="score">0</span></span>
@@ -574,7 +575,7 @@ window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 // Standard mapping: 0=X(Cross), 1=Circle, 2=Square, 3=Triangle
 // D-pad: 12=up, 13=down, 14=left, 15=right. Left stick: axes[0]=x, axes[1]=y
 let gamepadIndex = null;
-let gamepadPrev = { x:false, o:false, tri:false };
+let gamepadPrev = { x:false, o:false, tri:false, sq:false };
 const GP_DEADZONE = 0.2;
  
 window.addEventListener('gamepadconnected', (e) => {
@@ -655,6 +656,7 @@ function pollGamepad(){
  
   const xBtn = gp.buttons[0] && gp.buttons[0].pressed;   // X = shoot
   const oBtn = gp.buttons[1] && gp.buttons[1].pressed;   // Circle = missile
+  const sqBtn = gp.buttons[2] && gp.buttons[2].pressed;  // Square/X = nuke
   const triBtn = gp.buttons[3] && gp.buttons[3].pressed; // Triangle = flare
   const rtBtn = gp.buttons[7] && gp.buttons[7].pressed;  // R2/RT = shield ability
   const rbBtn = gp.buttons[5] && gp.buttons[5].pressed;  // R1/RB = missile panic ability
@@ -662,7 +664,7 @@ function pollGamepad(){
   const ltBtn = gp.buttons[6] && gp.buttons[6].pressed;  // L2/LT = call backup
   const selectBtn = gp.buttons[8] && gp.buttons[8].pressed; // Select/Back/View = emergency healing
  
-  return { mx, my, xBtn, oBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn };
+  return { mx, my, xBtn, oBtn, sqBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn };
 }
  
 let running = false;
@@ -689,10 +691,12 @@ function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 // drawn in local ship space (nose pointing up/-y, roughly -20..20 in each axis)
  
 function drawThruster(ctx, thrusting, color){
-  if(!thrusting) return;
+  // Fighter jets always run hot — a small idle flame shows even standing
+  // still, flaring up into the full plume while actually moving.
   ctx.fillStyle = color || 'rgba(255,150,0,0.8)';
   ctx.beginPath();
-  ctx.moveTo(-4,18); ctx.lineTo(0,18+rand(6,14)); ctx.lineTo(4,18);
+  const len = thrusting ? rand(6,14) : rand(2,5);
+  ctx.moveTo(-4,18); ctx.lineTo(0,18+len); ctx.lineTo(4,18);
   ctx.fill();
 }
  
@@ -919,6 +923,45 @@ const SHIP_SKINS = [
     ctx.stroke();
     ctx.fillStyle='#e8e8ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
     drawThruster(ctx,th,'rgba(255,255,255,0.85)');
+  }},
+  { id:'binary', name:'Binary', unlock:{type:'wave', value:1024}, exclusive:true,
+    unlockDesc:"well done, go touch some grass now, or grind to wave 2048 for a new skin, and a prize... :]", draw(ctx,th){
+    // hull built out of a scrolling field of 0s and 1s
+    ctx.fillStyle='#04120a'; ctx.strokeStyle='#00ff66'; ctx.lineWidth=1.6;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle='#00ff66'; ctx.font='6px monospace'; ctx.textAlign='center';
+    for(let row=-18;row<=16;row+=6){
+      for(let col=-9;col<=9;col+=6){
+        ctx.fillText(((row+col+Math.floor(th?frame*0.3:0))%2===0)?'1':'0', col, row);
+      }
+    }
+    ctx.restore();
+    ctx.fillStyle='#00ff66'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(0,255,150,0.85)');
+  }},
+  { id:'controller', name:'Controller', unlock:{type:'special'}, exclusive:true,
+    unlockDesc:"Earned only by reaching wave 1024 and cracking open the Binary reward.", draw(ctx,th){
+    // gamepad-styled hull — face buttons on the wings, d-pad nose
+    ctx.fillStyle='#1a1a22'; ctx.strokeStyle='#8cf'; ctx.lineWidth=1.6;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // face buttons: triangle/circle/x/square colors
+    ctx.fillStyle='#2ecc71'; ctx.beginPath(); ctx.arc(6,-4,2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#e74c3c'; ctx.beginPath(); ctx.arc(9,0,2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3498db'; ctx.beginPath(); ctx.arc(6,4,2,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#f1c40f'; ctx.beginPath(); ctx.arc(3,0,2,0,Math.PI*2); ctx.fill();
+    // d-pad
+    ctx.fillStyle='#8cf';
+    ctx.fillRect(-8,-2,6,2); ctx.fillRect(-6,-4,2,6);
+    ctx.fillStyle='#e8e8ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(140,200,255,0.85)');
   }}
 ];
  
@@ -1295,6 +1338,99 @@ const ENEMY_SKINS = {
         ctx.fillRect(76,h,8,600);
       }
     }}
+  ],
+  biplane: [
+    { id:'default', name:'Standard Biplane', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#8a6a3a'; ctx.strokeStyle='#d9b46a'; ctx.lineWidth=1.4;
+      // twin stacked wings
+      ctx.fillRect(-e.w/2,-2,e.w,4);
+      ctx.fillRect(-e.w/2+3,-9,e.w-6,3);
+      ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(5,10); ctx.lineTo(-5,10); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle='#5a3f1e'; ctx.beginPath();
+      ctx.moveTo(-e.w/2+2,-8); ctx.lineTo(-e.w/2+2,0);
+      ctx.moveTo(e.w/2-2,-8); ctx.lineTo(e.w/2-2,0);
+      ctx.stroke();
+    }}
+  ],
+  uav: [
+    { id:'default', name:'Standard UAV', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(140,255,140,${0.25+0.35*shieldPct})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+8,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle='#3a4a3a'; ctx.strokeStyle='#8cff8c'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#8cff8c'; ctx.beginPath(); ctx.arc(0,-2,4,0,Math.PI*2); ctx.fill();
+      ctx.fillRect(-e.w/2-6,-1,6,2); ctx.fillRect(e.w/2,-1,6,2);
+    }}
+  ],
+  helicopter: [
+    { id:'default', name:'Standard Helicopter', unlock:{type:'default'}, draw(ctx,e){
+      ctx.fillStyle='#4a4a52'; ctx.strokeStyle='#9aa'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.ellipse(0,2,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillRect(e.w/2-2,0,10,3); // tail boom
+      // spinning rotor
+      ctx.save();
+      ctx.rotate(e.phase*4);
+      ctx.strokeStyle='rgba(200,220,255,0.7)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-e.w*0.9,-e.h/2-2); ctx.lineTo(e.w*0.9,-e.h/2-2); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(0,-e.h/2-2,2.5,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  quadcopter: [
+    { id:'default', name:'Standard Quadcopter', unlock:{type:'default'}, draw(ctx,e){
+      ctx.strokeStyle='#333'; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(-e.w/2,-e.h/2); ctx.lineTo(e.w/2,e.h/2);
+      ctx.moveTo(e.w/2,-e.h/2); ctx.lineTo(-e.w/2,e.h/2);
+      ctx.stroke();
+      ctx.fillStyle='#1a1a1a'; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
+      // four spinning rotors
+      ctx.fillStyle='rgba(150,200,255,0.55)';
+      for(const [dx,dy] of [[-e.w/2,-e.h/2],[e.w/2,-e.h/2],[-e.w/2,e.h/2],[e.w/2,e.h/2]]){
+        ctx.beginPath(); ctx.arc(dx,dy,5+Math.sin(e.phase*6)*1.5,0,Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle='#e91e63'; ctx.beginPath(); ctx.arc(0,0,2,0,Math.PI*2); ctx.fill();
+    }}
+  ],
+  blimp: [
+    { id:'default', name:'Standard Blimp', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,220,120,${0.25+0.35*shieldPct})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(0,0,(e.w/2)+8,(e.h/2)+6,0,0,Math.PI*2); ctx.stroke();
+      }
+      ctx.fillStyle='#c9b466'; ctx.strokeStyle='#8f7a30'; ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.ellipse(0,0,e.w/2,e.h/2,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#8f7a30'; ctx.fillRect(-e.w/4,e.h/2-6,e.w/2,8);
+    }}
+  ],
+  core2duo: [
+    { id:'default', name:'Core 2 Duo', unlock:{type:'default'}, draw(ctx,e){
+      if(e.shieldHp>0){
+        const shieldPct = e.shieldHp / e.shieldMax;
+        ctx.strokeStyle = `rgba(255,215,0,${0.3+0.4*shieldPct})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(0,0,(e.w/2)+14,0,Math.PI*2); ctx.stroke();
+      }
+      // twin-core silicon-chip look
+      ctx.fillStyle='#141414'; ctx.strokeStyle='#ffd700'; ctx.lineWidth=2;
+      ctx.fillRect(-e.w/2,-e.h/2,e.w,e.h); ctx.strokeRect(-e.w/2,-e.h/2,e.w,e.h);
+      ctx.fillStyle='#ffd700';
+      ctx.beginPath(); ctx.arc(-e.w/5,0,e.h/5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.w/5,0,e.h/5,0,Math.PI*2); ctx.fill();
+      // pins along the edges
+      ctx.fillStyle='#ffe066';
+      for(let i=-e.w/2+6;i<e.w/2;i+=10){
+        ctx.fillRect(i,-e.h/2-5,3,5);
+        ctx.fillRect(i,e.h/2,3,5);
+      }
+    }}
   ]
 };
  
@@ -1317,11 +1453,26 @@ function saveStats(stats){
 }
 function updateStats({finalScore, finalWave, killsThisRun}){
   const stats = getStats();
+  const prevBestWave = stats.bestWave;
   stats.bestScore = Math.max(stats.bestScore, finalScore||0);
   stats.bestWave = Math.max(stats.bestWave, finalWave||0);
   stats.totalKills = (stats.totalKills||0) + (killsThisRun||0);
   saveStats(stats);
+  checkWaveMilestoneRewards(prevBestWave, stats.bestWave);
   return stats;
+}
+
+// One-time payout the first time a run's best wave crosses 1024 — the skin
+// itself unlocks normally via the wave-based unlock check, but the bonus
+// currency + the Controller skin (special/granted-only) are handed out here.
+function checkWaveMilestoneRewards(prevBestWave, newBestWave){
+  if(prevBestWave < 1024 && newBestWave >= 1024){
+    addCash(10000);
+    addCoins(25000);
+    addNuggets(69420);
+    ownSkin('binary');
+    ownSkin('controller');
+  }
 }
  
 function isSkinUnlocked(skin, stats){
@@ -1330,6 +1481,7 @@ function isSkinUnlocked(skin, stats){
   if(skin.unlock.type === 'wave') return stats.bestWave >= skin.unlock.value;
   if(skin.unlock.type === 'kills') return stats.totalKills >= skin.unlock.value;
   if(skin.unlock.type === 'coins' || skin.unlock.type === 'cash' || skin.unlock.type === 'nuggets') return getOwnedSkins().includes(skin.id);
+  if(skin.unlock.type === 'special') return getOwnedSkins().includes(skin.id);
   return false;
 }
  
@@ -1341,6 +1493,7 @@ function unlockRequirementText(skin){
   if(skin.unlock.type === 'coins') return `${skin.unlock.value} coins — buy in Shop`;
   if(skin.unlock.type === 'cash') return `${skin.unlock.value} cash — buy in Shop`;
   if(skin.unlock.type === 'nuggets') return `${skin.unlock.value} nuggets — buy in Shop`;
+  if(skin.unlock.type === 'special') return '??? — secret reward';
   return '';
 }
  
@@ -1472,9 +1625,10 @@ const player = {
   flares: 3, flareCd: 0,
   lockTarget: null, lockProgress: 0,
   alive: true,
-  rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0,
+  rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0, wideRangeT:0, fireRateT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
-  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0
+  shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0,
+  nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0
 };
  
 function damagePlayer(amount){
@@ -1539,6 +1693,9 @@ function updateAllies(){
         const ang = Math.atan2(nearest.y-a.y, nearest.x-a.x);
         SFX.shoot();
         bullets.push({x:a.x,y:a.y,vx:Math.cos(ang)*10,vy:Math.sin(ang)*10,w:4,h:8,side:'player'});
+        if(player.wideRangeT>0){
+          bullets.push({x:a.x,y:a.y-4,vx:Math.cos(ang)*10,vy:Math.sin(ang)*10,w:3,h:6,side:'player'});
+        }
         if(a.spreadT>0){
           bullets.push({x:a.x,y:a.y,vx:Math.cos(ang-0.25)*10,vy:Math.sin(ang-0.25)*10,w:3,h:6,side:'player'});
           bullets.push({x:a.x,y:a.y,vx:Math.cos(ang+0.25)*10,vy:Math.sin(ang+0.25)*10,w:3,h:6,side:'player'});
@@ -1590,6 +1747,7 @@ let enemies = [];
 let flares = [];
 let particles = [];
 let bombs = [];
+let gasClouds = []; // Blimp death-gas -> ignites after a delay (see updateGasClouds)
  
 function spawnParticles(x,y,color,n=12,speed=3,size=3){
   for(let i=0;i<n;i++){
@@ -1614,7 +1772,13 @@ const ENEMY_EXPLOSION_COLORS = {
   nexus_core: ['#ffb428', '#ffe066'],
   phantom_carrier: ['#9f6cff', '#c9a5ff'],
   void_sentinel: ['#8f2bff', '#ff2b6b'],
-  mothership: ['#ff2b3f', '#ffcc33']
+  mothership: ['#ff2b3f', '#ffcc33'],
+  biplane: ['#d9b46a', '#8a6a3a'],
+  uav: ['#8cff8c', '#3a4a3a'],
+  helicopter: ['#cfd6ff', '#4a4a52'],
+  quadcopter: ['#96c8ff', '#e91e63'],
+  blimp: ['#ffd23d', '#8f7a30'],
+  core2duo: ['#ffd700', '#fff2b0']
 };
 function explodeEnemy(e){
   const colors = ENEMY_EXPLOSION_COLORS[e.type] || ['#fa4','#ffd'];
@@ -1622,6 +1786,52 @@ function explodeEnemy(e){
   spawnParticles(e.x,e.y,colors[1],14,4,3.5);
   spawnParticles(e.x,e.y,'#fff',6,2.5,5);
   SFX.explosion(Math.min(1.6, 0.7 + e.w/60));
+}
+
+// Blimp death effect: a gas cloud lingers, then ignites into fire that ticks
+// damage on anything caught inside it.
+function spawnBlimpGas(e){
+  gasClouds.push({ x:e.x, y:e.y, r: Math.max(e.w,e.h)/2+18, state:'gas',
+    igniteTimer: 450, fireTimer: 150, dmgTick: 0 });
+}
+function updateGasClouds(){
+  gasClouds = gasClouds.filter(g=>{
+    if(g.state==='gas'){
+      g.igniteTimer--;
+      if(g.igniteTimer<=0){ g.state='fire'; SFX.explosionSmall(); shakeT=Math.max(shakeT,6); }
+      return true;
+    } else {
+      g.fireTimer--;
+      g.dmgTick--;
+      if(g.dmgTick<=0){
+        g.dmgTick = 60; // once per second
+        if(dist(g,player) < g.r){
+          if(damagePlayer(5)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
+        }
+        for(const a of allies){
+          if(a.alive && dist(g,a) < g.r) damageAlly(a,5);
+        }
+      }
+      return g.fireTimer > 0;
+    }
+  });
+}
+function drawGasClouds(){
+  for(const g of gasClouds){
+    ctx.save();
+    ctx.translate(g.x,g.y);
+    if(g.state==='gas'){
+      ctx.fillStyle = 'rgba(150,200,80,0.35)';
+      ctx.beginPath(); ctx.arc(0,0,g.r,0,Math.PI*2); ctx.fill();
+    } else {
+      const flicker = 0.6 + Math.sin(frame*0.5+g.x)*0.15;
+      ctx.fillStyle = `rgba(255,120,20,${flicker})`;
+      ctx.beginPath(); ctx.arc(0,0,g.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = `rgba(255,220,80,${flicker*0.7})`;
+      ctx.beginPath(); ctx.arc(0,0,g.r*0.55,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
 }
  
 // ---------- Power-ups ----------
@@ -1634,7 +1844,9 @@ const POWERUP_TYPES = [
   { id:'scoremult',    weight:15, color:'#ffe066', glyph:'$', label:'SCORE x2' },
   { id:'missilepanic', weight:5,  color:'#ff3d5c', glyph:'M', label:'MISSILE PANIC' },
   { id:'commsjam',     weight:15, color:'#b388ff', glyph:'J', label:'COMMS JAM' },
-  { id:'backup',       weight:0.1, color:'#4ecdc4', glyph:'B', label:'BACKUP' }
+  { id:'backup',       weight:0.1, color:'#4ecdc4', glyph:'B', label:'BACKUP' },
+  { id:'firerate',     weight:13, color:'#ff6b3d', glyph:'>', label:'FIRE RATE+' },
+  { id:'widerange',    weight:13, color:'#3dffb3', glyph:'W', label:'WIDE RANGE' }
 ];
  
 function pickPowerupType(){
@@ -1664,6 +1876,7 @@ function awardKillCoins(e){
 }
  
 function applyPowerup(type){
+  if(player.empT>0) return; // EMP-disabled — pickups don't stick until it wears off
   SFX.powerupPickup();
   spawnParticles(player.x, player.y, '#fff', 14, 3, 3);
   switch(type){
@@ -1689,9 +1902,20 @@ function applyPowerup(type){
     case 'backup':
       spawnAllies(4);
       break;
+    case 'widerange': player.wideRangeT = 480; break;
+    case 'firerate': player.fireRateT = 480; break;
   }
 }
  
+// Quadcopter EMP burst — zeroes out any currently-running player buffs for
+// a fixed window instead of blocking new pickups outright.
+function disablePlayerPowerups(frames){
+  player.rapidFireT = 0; player.shieldT = 0; player.spreadT = 0;
+  player.scoreMultT = 0; player.wideRangeT = 0; player.fireRateT = 0;
+  player.missilePanicT = 0; player.commsJamT = 0;
+  player.empT = frames; // brief lockout so a fresh pickup can't undo the EMP instantly
+}
+
 const ALLY_USABLE_POWERUPS = ['rapidfire','shield','spread','commsjam'];
 function updatePowerups(){
   powerups = powerups.filter(p=>{
@@ -1720,6 +1944,10 @@ function updatePowerupTimers(){
   if(player.shieldT>0) player.shieldT--;
   if(player.spreadT>0) player.spreadT--;
   if(player.scoreMultT>0) player.scoreMultT--;
+  if(player.wideRangeT>0) player.wideRangeT--;
+  if(player.fireRateT>0) player.fireRateT--;
+  if(player.empT>0) player.empT--;
+  if(player.nukeCd>0) player.nukeCd--;
   if(player.shieldAbilityCd>0) player.shieldAbilityCd--;
   if(player.missilePanicAbilityCd>0) player.missilePanicAbilityCd--;
   if(player.commsJamAbilityCd>0) player.commsJamAbilityCd--;
@@ -1754,7 +1982,9 @@ const BUFF_LABELS = {
   spread:       ['SPREAD SHOT', '#ff9a3d'],
   scoremult:    ['SCORE x2', '#ffe066'],
   missilepanic: ['MISSILE PANIC', '#ff3d5c'],
-  commsjam:     ['ENEMY COMMS JAMMED', '#b388ff']
+  commsjam:     ['ENEMY COMMS JAMMED', '#b388ff'],
+  widerange:    ['WIDE RANGE', '#3dffb3'],
+  firerate:     ['FIRE RATE+', '#ff6b3d']
 };
 function drawBuffHud(){
   const active = [];
@@ -1764,6 +1994,8 @@ function drawBuffHud(){
   if(player.scoreMultT>0) active.push(['scoremult', player.scoreMultT]);
   if(player.missilePanicT>0) active.push(['missilepanic', player.missilePanicT]);
   if(player.commsJamT>0) active.push(['commsjam', player.commsJamT]);
+  if(player.wideRangeT>0) active.push(['widerange', player.wideRangeT]);
+  if(player.fireRateT>0) active.push(['firerate', player.fireRateT]);
   if(!active.length) return;
   ctx.save();
   ctx.font = '11px "Courier New", monospace';
@@ -1841,6 +2073,32 @@ function spawnEnemy(type){
     Object.assign(base,{ hp:1890, maxHp:1890, w:450,h:200, speed:0.35, scoreVal:2000,
       launchCd: rand(120,200), fireCd: 15, shieldHp:851, shieldMax:851, shieldHitTimer:0,
       laserCd:60, laserT:0, laserCount:2, missileCount:0, isBoss:true });
+  } else if(type==='biplane'){
+    // -20% HP vs Fighter, slow single-bullet potshots that hit for half as
+    // much as the player's own gun — a soft, old-timey harasser.
+    Object.assign(base,{ hp:16, maxHp:16, w:26,h:18, speed:2.4, scoreVal:80, gunCd: rand(60,150) });
+  } else if(type==='uav'){
+    // Snipes down player missiles with its own interceptor missiles instead
+    // of ever firing at the player directly.
+    Object.assign(base,{ hp:250, maxHp:250, w:34,h:14, speed:2, scoreVal:180,
+      shieldHp:25, shieldMax:25, shieldHitTimer:0, interceptCd: rand(90,150) });
+  } else if(type==='helicopter'){
+    // Same HP as the base Fighter — just a much slower, sparser missile threat.
+    Object.assign(base,{ hp:20, maxHp:20, w:30,h:24, speed:1.4, scoreVal:130, missileCd: rand(200,450) });
+  } else if(type==='quadcopter'){
+    // The 4-rotor "Drone" — cheap, fast, disables powerups on contact via EMP.
+    Object.assign(base,{ hp:25, maxHp:25, w:22,h:22, speed:2.2, scoreVal:70, empCd: rand(150,240) });
+  } else if(type==='blimp'){
+    // Slow floating tank — its real threat is the gas cloud it releases when
+    // shot down (see spawnBlimpGas / updateGasClouds).
+    Object.assign(base,{ hp:65, maxHp:65, w:80,h:44, speed:0.6, scoreVal:220,
+      shieldHp:65, shieldMax:65, shieldHitTimer:0 });
+  } else if(type==='core2duo'){
+    // BOSS: "Golden Pins" — alternating golden bullet bursts and golden
+    // homing missiles. Spawns roughly every 10 waves (see waveComposition).
+    Object.assign(base,{ hp:2006, maxHp:2006, w:70,h:70, speed:0.9, scoreVal:1800,
+      shieldHp:727, shieldMax:727, shieldHitTimer:0, pinCd: rand(60,100),
+      pinMissileCd: rand(180,260), isBoss:true });
   }
   enemies.push(base);
 }
@@ -1856,14 +2114,22 @@ function waveComposition(w){
   if(w%4===0) list.push('spaceship');
   if(w>=6 && w%6===0) list.push('carrier');
   if(w>=5 && w%5===0) list.push('sentinel');
-  
+
+  // NEW ENEMIES
+  if(w>=4) for(let i=0;i<Math.min(1+Math.floor(w/6),4);i++) list.push('biplane');
+  if(w>=6) for(let i=0;i<Math.min(1+Math.floor(w/10),3);i++) list.push('uav');
+  if(w>=7) for(let i=0;i<Math.min(1+Math.floor(w/8),3);i++) list.push('helicopter');
+  if(w>=3) for(let i=0;i<Math.min(1+Math.floor(w/4),5);i++) list.push('quadcopter');
+  if(w>=8 && w%3===0) list.push('blimp');
+
   // BOSS WAVES (192+)
   if(w===192) list.push('glitch_entity');
   if(w===200) list.push('nexus_core');
   if(w===208) list.push('phantom_carrier');
   if(w===216) list.push('void_sentinel');
   if(w>=100 && w%100===0) list.push('mothership');
-  
+  if(w>=10 && w%10===0) list.push('core2duo');
+
   return list;
 }
  
@@ -1874,6 +2140,12 @@ function startWave(w){
   spawnTimer = 0;
   // CORRUPTION: starts at wave 192, fully corrupted by wave 256
   corruptionLevel = (w < 192 || w >= 314) ? 0 : Math.min(1, (w - 192) / (256 - 192));
+  // NUKE: earn one charge every 50 waves survived
+  if(w % 50 === 0 && w > player.nukeAwardedAt){
+    player.nukeAwardedAt = w;
+    player.nukeCharges = (player.nukeCharges||0) + 1;
+    document.getElementById('nukecount').textContent = player.nukeCharges;
+  }
   SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
@@ -1884,11 +2156,16 @@ function startWave(w){
 // ---------- Input actions ----------
 function tryFireGun(){
   if(player.fireCd>0) return;
-  player.fireCd = player.rapidFireT>0 ? 4 : 8;
+  let cd = player.rapidFireT>0 ? 4 : 8;
+  if(player.fireRateT>0) cd = Math.max(1, Math.round(cd*0.875)); // +12.5% fire rate
+  player.fireCd = cd;
   SFX.shoot();
   bullets.push({ x:player.x, y:player.y-20, vx:0, vy:-12, w:4,h:10, side:'player' });
   bullets.push({ x:player.x-14, y:player.y-8, vx:-1, vy:-11, w:3,h:8, side:'player' });
   bullets.push({ x:player.x+14, y:player.y-8, vx:1, vy:-11, w:3,h:8, side:'player' });
+  if(player.wideRangeT>0){
+    bullets.push({ x:player.x, y:player.y-24, vx:0, vy:-12, w:3,h:8, side:'player' }); // 4th gunner
+  }
   if(player.spreadT>0){
     bullets.push({ x:player.x-22, y:player.y-2, vx:-2.2, vy:-10.5, w:3,h:8, side:'player' });
     bullets.push({ x:player.x+22, y:player.y-2, vx:2.2, vy:-10.5, w:3,h:8, side:'player' });
@@ -1950,6 +2227,33 @@ function popFlare(){
   flares.push({ x:player.x, y:player.y+10, life:90, maxLife:90 });
   document.getElementById('flarecount').textContent = player.flares;
 }
+
+// Nuke — one charge earned every 50 waves. Wipes the current wave's
+// remaining spawns/enemies and skips the wave counter forward by 5.
+function tryNuke(){
+  if(player.nukeCd>0 || (player.nukeCharges||0)<=0) return;
+  player.nukeCharges--;
+  player.nukeCd = 30;
+  document.getElementById('nukecount').textContent = player.nukeCharges;
+  shakeT = 18;
+  SFX.explosion(1.8);
+  for(const e of enemies){
+    if(!e.isBoss){
+      addScore(Math.round(e.scoreVal*0.5));
+      spawnParticles(e.x,e.y,'#ffd700',16,5,4);
+      e.alive = false;
+    }
+  }
+  enemies = enemies.filter(e=>e.alive!==false);
+  enemyBullets = [];
+  missiles = missiles.filter(m=>m.side==='player');
+  wave += 5;
+  startWave(wave);
+  const el = document.getElementById('wavecall');
+  el.textContent = `NUKE! WAVE ${wave} INCOMING`;
+  el.style.opacity = 1;
+  setTimeout(()=>{ el.style.opacity = 0; }, 1600);
+}
  
 // ---------- Update ----------
 function updatePlayer(){
@@ -1974,6 +2278,7 @@ function updatePlayer(){
   const shootHeld = keys['e'] || (gp && gp.xBtn);
   const missileHeld = keys['q'] || (gp && gp.oBtn);
   const flarePressed = keys['f'] || (gp && gp.triBtn && !gamepadPrev.tri);
+  const nukePressed = keys['n'] || (gp && gp.sqBtn && !gamepadPrev.sq);
   const shieldAbilityHeld = keys['c'] || (gp && gp.rtBtn);
   const missilePanicAbilityHeld = keys['alt'] || (gp && gp.rbBtn);
   const commsJamAbilityHeld = keys['v'] || (gp && gp.lbBtn);
@@ -1982,6 +2287,7 @@ function updatePlayer(){
  
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
+  if(nukePressed) tryNuke();
  
   if(shieldAbilityHeld && hasAbility('shield_ability') && player.shieldAbilityCd<=0){
     player.shieldT = Math.max(player.shieldT, 360);
@@ -2033,6 +2339,7 @@ function updatePlayer(){
   }
  
   if(gp) gamepadPrev.tri = gp.triBtn;
+  if(gp) gamepadPrev.sq = gp.sqBtn;
  
   const lockEl = document.getElementById('lockind');
   lockEl.style.display = (player.missilePanicT<=0 && player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
@@ -2058,7 +2365,16 @@ function updateMissiles(){
     // retarget to nearby flare if player missile targeting... actually flares decoy ENEMY missiles
     if(m.side==='enemy'){
       let tgt;
-      if(player.commsJamT>0 && !m.heatseeking){
+      if(m.interceptor){
+        // UAV interceptor — chases the specific player missile it locked onto,
+        // not the player. If that missile is already gone, just fly straight.
+        if(m.target && !m.target.dead){
+          tgt = m.target;
+        } else {
+          m.x+=m.vx; m.y+=m.vy;
+          return m.x>-40 && m.x<W+40 && m.y>-40 && m.y<H+40;
+        }
+      } else if(player.commsJamT>0 && !m.heatseeking){
         // comms jammed — lost lock on the player, mistakes another enemy as its target
         if(!m.jamTarget || !m.jamTarget.alive || frame % 45 === 0){
           const candidates = enemies.filter(en=>en.alive);
@@ -2122,11 +2438,11 @@ function updateBombs(){
 }
  
 function updateEnemies(){
-  // spawn logic
+  // spawn logic — interval shrinks as waves climb, so later waves feel denser
   spawnTimer--;
   if(spawnQueue.length && spawnTimer<=0){
     spawnEnemy(spawnQueue.shift());
-    spawnTimer = 40;
+    spawnTimer = Math.max(14, 40 - Math.floor(wave/8));
   }
  
   for(const e of enemies){
@@ -2270,6 +2586,69 @@ function updateEnemies(){
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*3.2,vy:Math.sin(ang)*3.2,w:5,h:5,side:'enemy'});
       }
     }
+    else if(e.type==='biplane'){
+      // slow drifting harasser — single potshots, half the punch of a player bullet
+      if(e.y<160) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.5)*1.1;
+      e.gunCd--;
+      if(e.gunCd<=0){
+        e.gunCd = 150; // fires every 2.5s @ 60fps
+        SFX.enemyShoot();
+        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:4,h:4,side:'enemy',dmg:4});
+      }
+    }
+    else if(e.type==='uav'){
+      // Never fires at the player — hunts down the nearest live player
+      // missile and launches an interceptor to snipe it out of the air.
+      if(e.y<180) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.3)*0.9;
+      e.interceptCd--;
+      if(e.interceptCd<=0){
+        const target = missiles.find(m => m.side==='player' && !m.dead);
+        if(target){
+          e.interceptCd = rand(90,150);
+          SFX.missileLaunch();
+          missiles.push(makeMissile({
+            x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:6,turn:0.2,life:180,w:5,h:10,
+            spawnGrace:10, target, interceptor:true, heatseeking:false
+          }, false));
+        } else {
+          e.interceptCd = 20; // recheck soon if nothing to intercept yet
+        }
+      }
+    }
+    else if(e.type==='helicopter'){
+      // Same HP as a Fighter, but far slower and only lobs one missile at a time
+      if(e.y<170) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.25)*0.6;
+      e.missileCd--;
+      if(e.missileCd<=0){
+        e.missileCd = 450; // ~7.5s @ 60fps
+        SFX.missileLaunch();
+        missiles.push(makeMissile({x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4,turn:0.045,life:300,w:5,h:10,spawnGrace:15}, false));
+      }
+    }
+    else if(e.type==='quadcopter'){
+      // Skittish 4-rotor drone — periodically bursts an EMP that disables
+      // any player powerup currently running, if the player is in range.
+      if(e.y<200) e.y += e.speed*0.7;
+      e.x += Math.sin(e.phase*1.2)*2;
+      e.empCd--;
+      if(e.empCd<=0){
+        e.empCd = rand(150,240);
+        if(Math.abs(e.x-player.x) < 64 && Math.abs(e.y-player.y) < 64){
+          disablePlayerPowerups(300); // 5s @ 60fps
+          spawnParticles(e.x,e.y,'#96c8ff',16,4,3.5);
+          SFX.commsJam();
+        }
+      }
+    }
+    else if(e.type==='blimp'){
+      // Passive floater — the real threat is the gas cloud it drops on death
+      if(e.y<130) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.2)*0.5;
+    }
     // ===================== BOSSES =====================
     else if(e.type==='glitch_entity'){
       // Sniper boss: slow drift, precise 2-bullet burst + 1 heat-seeking missile
@@ -2407,6 +2786,30 @@ function updateEnemies(){
         }
       }
     }
+    else if(e.type==='core2duo'){
+      // "Golden Pins" — alternating golden bullet bursts and golden homing missiles
+      if(e.y<150) e.y += e.speed;
+      e.x += Math.sin(e.phase*0.3)*1.1;
+      e.pinCd--;
+      if(e.pinCd<=0){
+        e.pinCd = rand(60,100);
+        SFX.enemyShoot();
+        const baseAng = Math.atan2(player.y-e.y, player.x-e.x);
+        for(let i=-1;i<=1;i++){
+          const spread = i*0.12;
+          enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*5.5,vy:Math.sin(baseAng+spread)*5.5,w:4,h:4,side:'enemy',golden:true});
+        }
+      }
+      e.pinMissileCd--;
+      if(e.pinMissileCd<=0){
+        e.pinMissileCd = rand(180,260);
+        SFX.missileLaunch();
+        missiles.push(makeMissile({
+          x:e.x,y:e.y,vx:0,vy:3,side:'enemy',speed:4.3,turn:0.05,life:320,w:5,h:10,
+          spawnGrace:15, golden:true
+        }, false));
+      }
+    }
 
     if(e.y>H+60) e.alive=false;
   }
@@ -2469,6 +2872,7 @@ function updateCollisions(){
           explodeEnemy(e);
           maybeDropPowerup(e);
           awardKillCoins(e);
+          if(e.type==='blimp') spawnBlimpGas(e);
         }
         break;
       }
@@ -2503,7 +2907,24 @@ function updateCollisions(){
   }
   bullets = bullets.filter(b=>!b.dead);
   missiles = missiles.filter(m=>!m.dead);
- 
+
+  // UAV interceptor missiles vs player missiles — the UAV never shoots at
+  // the player directly, it just snipes incoming player missiles out of the air.
+  for(const m of missiles){
+    if(!m.interceptor || m.dead) continue;
+    for(const pm of missiles){
+      if(pm.side!=='player' || pm.dead) continue;
+      if(circleHit(m,pm,5,6)){
+        m.dead = true;
+        pm.dead = true;
+        spawnParticles(m.x,m.y,'#8cff8c',14,4);
+        SFX.explosionSmall();
+        break;
+      }
+    }
+  }
+  missiles = missiles.filter(m=>!m.dead);
+
   // player missiles vs enemies
   for(const m of missiles){
     if(m.side!=='player') continue;
@@ -2519,6 +2940,7 @@ function updateCollisions(){
           explodeEnemy(e);
           maybeDropPowerup(e);
           awardKillCoins(e);
+          if(e.type==='blimp') spawnBlimpGas(e);
         }
         break;
       }
@@ -2566,7 +2988,7 @@ function updateCollisions(){
   for(const b of enemyBullets){
     if(circleHit(b,player,4,14)){
       b.dead=true;
-      if(damagePlayer(5)){
+      if(damagePlayer(b.dmg || 5)){
         shakeT=5;
         spawnParticles(player.x,player.y,'#f66',10,3);
         SFX.playerHit();
@@ -2580,7 +3002,7 @@ function updateCollisions(){
       if(!a.alive) continue;
       if(circleHit(b,a,4,14)){
         b.dead=true;
-        if(damageAlly(a,5)){
+        if(damageAlly(a,b.dmg || 5)){
           spawnParticles(a.x,a.y,'#f66',8,3);
           SFX.hit();
         } else {
@@ -2714,8 +3136,10 @@ function drawBullets(){
   const bulletColor = getSkinById(BULLET_SKINS, equipped.bullet).color;
   ctx.fillStyle = bulletColor;
   for(const b of bullets) ctx.fillRect(b.x-b.w/2,b.y-b.h/2,b.w,b.h);
-  ctx.fillStyle='#fc6';
-  for(const b of enemyBullets){ ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill(); }
+  for(const b of enemyBullets){
+    ctx.fillStyle = b.golden ? '#ffd700' : '#fc6';
+    ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill();
+  }
 }
  
 function drawMissiles(){
@@ -2728,8 +3152,11 @@ function drawMissiles(){
     if(m.heatseeking){
       ctx.shadowColor = '#ff2fd6';
       ctx.shadowBlur = 8 + Math.sin(frame*0.3)*3;
+    } else if(m.golden){
+      ctx.shadowColor = '#ffd700';
+      ctx.shadowBlur = 8 + Math.sin(frame*0.3)*3;
     }
-    ctx.fillStyle = m.side==='player' ? missileColor : '#f74';
+    ctx.fillStyle = m.side==='player' ? missileColor : (m.golden ? '#ffd700' : '#f74');
     ctx.fillRect(-3,-8,6,16);
     ctx.restore();
   }
@@ -3037,6 +3464,7 @@ function loop(){
   updateBombs();
   updateEnemies();
   updateAllies();
+  updateGasClouds();
   updateCollisions();
   updatePowerups();
   if(godMode) player.hp = player.maxHp;
@@ -3074,10 +3502,12 @@ async function resetGame(){
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
   player.hp=player.maxHp; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
-  player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0;
+  player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
-  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[];
+  player.nukeCharges=0; player.nukeCd=0; player.nukeAwardedAt=0; player.empT=0;
+  document.getElementById('nukecount').textContent = 0;
+  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[]; gasClouds=[];
  
   // Apply any black-market consumables purchased for this run, then clear the queue.
   const pending = getPendingConsumables();
