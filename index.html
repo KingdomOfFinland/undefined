@@ -683,6 +683,86 @@ let betaUnlocked = false;
 let godMode = false;
 const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
  
+// ---------- Anti-cheat: devtools detection ----------
+// Heuristic-only (window-size diff for docked devtools) — not foolproof
+// (undocked panels, browser zoom, and some mobile layouts can false-positive),
+// but it's a reasonable deterrent without being invasive. devMode bypasses it
+// entirely so the legit admin console commands above still work.
+let cheatDetectedThisRun = false;
+function getBanState(){
+  const until = parseInt(localStorage.getItem('uf_ban_until')||'0',10) || 0;
+  return { banned: Date.now() < until, until };
+}
+function getCheatStrikes(){
+  return parseInt(localStorage.getItem('uf_cheat_strikes')||'0',10) || 0;
+}
+function addCheatStrike(){
+  const n = getCheatStrikes()+1;
+  if(n>=5){
+    localStorage.setItem('uf_ban_until', String(Date.now()+24*60*60*1000));
+    localStorage.setItem('uf_cheat_strikes','0'); // ban issued — strikes reset for the next 24h window
+  } else {
+    localStorage.setItem('uf_cheat_strikes', String(n));
+  }
+  return n;
+}
+function detectDevToolsOpen(){
+  const threshold = 160;
+  return (window.outerWidth - window.innerWidth) > threshold ||
+         (window.outerHeight - window.innerHeight) > threshold;
+}
+function showCheatOverlay(strikes){
+  const center = document.getElementById('center');
+  center.classList.remove('hidden');
+  const banState = getBanState();
+  if(banState.banned){
+    const totalMins = Math.max(1, Math.ceil((banState.until - Date.now())/60000));
+    center.innerHTML = `
+      <h1 style="color:#f55;text-shadow:0 0 12px #f00;">BANNED</h1>
+      <p>5 devtools/cheat detections. You're locked out for ${Math.floor(totalMins/60)}h ${totalMins%60}m.</p>
+    `;
+    return;
+  }
+  center.innerHTML = `
+    <h1 style="color:#f55;text-shadow:0 0 12px #f00;">CHEATING DETECTED</h1>
+    <p>DevTools were opened without dev mode enabled. This run is flagged and won't be submitted to the leaderboard.</p>
+    <p style="color:#fa0;">Strike ${strikes}/5 — 5 strikes in a row means a 24h ban.</p>
+    <button id="cheatRelaunchBtn">RELAUNCH</button>
+  `;
+  const btn = document.getElementById('cheatRelaunchBtn');
+  if(btn) btn.onclick = () => { SFX.uiClick(); resetGame(); };
+}
+function triggerDevToolsCheat(){
+  if(devMode || cheatDetectedThisRun) return;
+  cheatDetectedThisRun = true;
+  cheatFlagged = true;
+  cheatReason = 'DEVTOOLS OPENED WITHOUT DEV MODE';
+  running = false;
+  const strikes = addCheatStrike();
+  showCheatOverlay(strikes);
+}
+setInterval(() => {
+  if(running && detectDevToolsOpen()) triggerDevToolsCheat();
+}, 700);
+
+// Block the common devtools keybinds outright when dev mode isn't active.
+// Note: preventDefault() can't force a browser to not open devtools (F12 in
+// particular is browser-reserved in most of them) — but it stops the
+// keystroke from doing anything else, and the attempt itself is treated as
+// the same violation as devtools actually being open.
+window.addEventListener('keydown', (e) => {
+  if(devMode) return;
+  const key = e.key.toLowerCase();
+  const isDevToolsKey = key === 'f12' ||
+    (e.ctrlKey && e.shiftKey && ['c','i','j','k'].includes(key)) ||
+    (e.metaKey && e.altKey && key === 'i'); // Safari
+  if(isDevToolsKey){
+    e.preventDefault();
+    e.stopPropagation();
+    triggerDevToolsCheat();
+  }
+}, true);
+ 
 function rand(a,b){ return a + Math.random()*(b-a); }
 function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
@@ -3661,10 +3741,15 @@ function loop(){
 }
  
 async function resetGame(){
+  const banState = getBanState();
+  if(banState.banned){
+    showCheatOverlay(0);
+    return;
+  }
   await ensureUsername();
   score=0; wave=1;
   dyingTimer = 0;
-  scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0;
+  scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0; cheatDetectedThisRun = false;
   player.hp=player.maxHp; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
@@ -5006,6 +5091,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const center = document.getElementById('center');
   if(center) centerObserver.observe(center, { childList:true, subtree:true });
   applyDisplaySettings();
+  const banState = getBanState();
+  if(banState.banned) showCheatOverlay(0);
 });
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
