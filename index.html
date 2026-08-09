@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Undefined Fighter</title>
 <style>
   :root { --accent1:#0ff; --accent2:#00ffcc; --accent-glow:rgba(0,255,200,0.15); --accent-border:#1a4a5a; }
@@ -9,7 +13,8 @@
   body {
     background:#05060a; color:#c9f7ff; font-family:'Courier New', monospace;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    min-height:100vh; overflow:hidden;
+    min-height:100vh; min-height:100dvh; overflow:hidden;
+    overscroll-behavior:none; touch-action:none;
   }
   #wrap { position:relative; }
   canvas {
@@ -18,6 +23,7 @@
     display:block;
     max-width:100vw; max-height:100vh;
     width:auto; height:auto;
+    touch-action:none;
   }
   #hud {
     position:absolute; top:0; left:0; width:100%; padding:10px 16px;
@@ -138,6 +144,73 @@
     font-size:22px; color:#f55; text-shadow:0 0 10px #f00; pointer-events:none;
     opacity:0; transition:opacity 0.3s;
   }
+
+  /* ---------- Mobile / touch controls ---------- */
+  #rotateHint {
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,5,10,0.97); z-index:80;
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:20px;
+  }
+  #rotateHint.show { display:flex; }
+  #rotateHint .rotateIcon { font-size:44px; animation:rotateWiggle 1.6s ease-in-out infinite; }
+  #rotateHint p { font-size:14px; color:#8cf; max-width:280px; line-height:1.6; }
+  @keyframes rotateWiggle {
+    0%,100% { transform:rotate(0deg); }
+    50% { transform:rotate(90deg); }
+  }
+
+  #mobileControls {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; display:none; z-index:20; touch-action:none;
+    -webkit-user-select:none; user-select:none;
+  }
+  #mobileControls.show { display:block; }
+
+  #joystickZone {
+    position:absolute; left:4%; bottom:6%; width:34vmin; height:34vmin;
+    max-width:170px; max-height:170px; min-width:110px; min-height:110px;
+    pointer-events:auto; touch-action:none;
+  }
+  #joystickBase {
+    position:absolute; top:0; left:0; width:100%; height:100%; border-radius:50%;
+    background:rgba(0,30,40,0.35); border:2px solid rgba(0,220,255,0.35);
+  }
+  #joystickStick {
+    position:absolute; top:50%; left:50%; width:42%; height:42%; border-radius:50%;
+    background:rgba(0,220,255,0.45); border:2px solid rgba(180,255,255,0.7);
+    transform:translate(-50%,-50%); transition:background 0.1s;
+  }
+  #joystickZone.active #joystickStick { background:rgba(0,255,255,0.7); }
+
+  .mcBtn {
+    position:absolute; border-radius:50%; pointer-events:auto; touch-action:none;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    background:rgba(0,30,40,0.4); border:2px solid rgba(0,220,255,0.4);
+    color:#aef2ff; font-family:inherit; font-weight:bold; text-shadow:0 0 6px rgba(0,200,255,0.6);
+    line-height:1.1;
+  }
+  .mcBtn:active, .mcBtn.pressed { background:rgba(0,220,255,0.55); border-color:#9ff; }
+  .mcBtn .mcSub { font-size:0.55em; opacity:0.8; font-weight:normal; }
+
+  #fireBtn { right:5%; bottom:7%; width:19vmin; height:19vmin; max-width:92px; max-height:92px; min-width:64px; min-height:64px; font-size:13px; }
+  #missileBtn { right:23%; bottom:4%; width:15vmin; height:15vmin; max-width:76px; max-height:76px; min-width:54px; min-height:54px; font-size:11px; }
+  #flareBtn { right:2%; bottom:30%; width:12vmin; height:12vmin; max-width:60px; max-height:60px; min-width:46px; min-height:46px; font-size:10px; }
+  #nukeBtn { right:18%; bottom:34%; width:12vmin; height:12vmin; max-width:60px; max-height:60px; min-width:46px; min-height:46px; font-size:10px; display:none; }
+  #nukeBtn.avail { display:flex; }
+
+  #abilityRow {
+    position:absolute; left:50%; bottom:2%; transform:translateX(-50%);
+    display:flex; gap:8px; pointer-events:none;
+  }
+  .abilityBtn { position:static; width:44px; height:44px; font-size:9px; display:none; }
+  .abilityBtn.owned { display:flex; pointer-events:auto; }
+
+  #touchToggleBtn {
+    background:#123; color:#8cf; border:1px solid #145; font-size:11px;
+    padding:6px 12px; font-weight:normal; box-shadow:none;
+  }
+  #touchToggleBtn:hover { background:#1a3a45; }
 </style>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -393,9 +466,33 @@
   <div id="wavecall"></div>
   <div id="devIndicator" style="position:absolute;bottom:6px;left:6px;font-size:11px;color:#0f8;text-shadow:0 0 6px #0f8;display:none;pointer-events:none;">⚙ DEV MODE</div>
   <div id="gpIndicator" style="position:absolute;bottom:6px;right:6px;font-size:11px;color:#0af;text-shadow:0 0 6px #0af;display:none;pointer-events:none;">🎮 CONTROLLER CONNECTED</div>
+
+  <div id="mobileControls">
+    <div id="joystickZone">
+      <div id="joystickBase"></div>
+      <div id="joystickStick"></div>
+    </div>
+    <div class="mcBtn" id="fireBtn">FIRE</div>
+    <div class="mcBtn" id="missileBtn">LOCK</div>
+    <div class="mcBtn" id="flareBtn">FLARE</div>
+    <div class="mcBtn" id="nukeBtn">NUKE</div>
+    <div id="abilityRow">
+      <div class="mcBtn abilityBtn" id="abShieldBtn">SHIELD</div>
+      <div class="mcBtn abilityBtn" id="abPanicBtn">PANIC</div>
+      <div class="mcBtn abilityBtn" id="abJamBtn">JAM</div>
+      <div class="mcBtn abilityBtn" id="abBackupBtn">BACKUP</div>
+      <div class="mcBtn abilityBtn" id="abHealBtn">HEAL</div>
+    </div>
+  </div>
+
+  <div id="rotateHint">
+    <div class="rotateIcon">📱</div>
+    <p>Rotate your device to landscape for the best experience.</p>
+  </div>
+
   <div id="center">
     <h1>UNDEFINED FIGHTER</h1>
-    <p>
+    <p id="controlsInfo">
       F-8 vs everything. WASD/Arrows move. <b>E</b> guns. Hold <b>Q</b> near an enemy to lock on,
       release to fire homing missile. <b>F</b> pops a flare to decoy incoming missiles.<br><br>
       Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
@@ -404,6 +501,7 @@
     <button id="startBtn">LAUNCH</button>
     <button id="skinsBtnStart">SKINS</button>
     <button id="dailyBtn">🎁 DAILY</button>
+    <button id="touchToggleBtn">📱 Touch Controls: AUTO</button>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
       <ul id="lbList"><li>Loading...</li></ul>
@@ -667,7 +765,185 @@ function pollGamepad(){
  
   return { mx, my, xBtn, oBtn, sqBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn };
 }
- 
+
+// ---------- Platform detection & touch controls ----------
+// Coarse pointer (finger) or touch support = probably a phone/tablet. A
+// touchscreen laptop with a mouse still reports "fine" as its primary
+// pointer, so this stays off for those unless the player forces it on below.
+function detectTouchCapable(){
+  return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+         ('ontouchstart' in window) || (navigator.maxTouchPoints||0) > 0;
+}
+const touchCapable = detectTouchCapable();
+
+function getTouchPref(){
+  return localStorage.getItem('uf_touch_controls') || 'auto'; // 'auto' | 'on' | 'off'
+}
+function setTouchPref(v){ localStorage.setItem('uf_touch_controls', v); }
+function isMobileLayout(){
+  const pref = getTouchPref();
+  if(pref === 'on') return true;
+  if(pref === 'off') return false;
+  return touchCapable;
+}
+
+function updateControlsInfoText(){
+  const p = document.getElementById('controlsInfo');
+  if(!p) return;
+  if(isMobileLayout()){
+    p.innerHTML = `
+      F-8 vs everything. Left stick moves, right side fires. Tap and hold <b>LOCK</b> near an
+      enemy to lock on, release to fire a homing missile. <b>FLARE</b> decoys incoming missiles.<br><br>
+      Ability buttons appear above the fire controls once you've bought them in the shop.<br><br>
+      Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
+    `;
+  } else {
+    p.innerHTML = `
+      F-8 vs everything. WASD/Arrows move. <b>E</b> guns. Hold <b>Q</b> near an enemy to lock on,
+      release to fire homing missile. <b>F</b> pops a flare to decoy incoming missiles.<br><br>
+      Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
+      Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
+    `;
+  }
+}
+function updateTouchToggleBtnLabel(){
+  const btn = document.getElementById('touchToggleBtn');
+  if(!btn) return;
+  const pref = getTouchPref();
+  btn.textContent = pref === 'auto' ? `📱 Touch Controls: AUTO (${touchCapable?'ON':'OFF'})` :
+                     pref === 'on' ? '📱 Touch Controls: ON' : '📱 Touch Controls: OFF';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  updateControlsInfoText();
+  updateTouchToggleBtnLabel();
+  const toggleBtn = document.getElementById('touchToggleBtn');
+  if(toggleBtn){
+    toggleBtn.onclick = () => {
+      SFX.uiClick();
+      const order = ['auto','on','off'];
+      const next = order[(order.indexOf(getTouchPref())+1) % order.length];
+      setTouchPref(next);
+      updateTouchToggleBtnLabel();
+      updateControlsInfoText();
+      updateRotateHint();
+    };
+  }
+});
+
+function updateRotateHint(){
+  const hint = document.getElementById('rotateHint');
+  if(!hint) return;
+  const portrait = window.innerHeight > window.innerWidth;
+  hint.classList.toggle('show', isMobileLayout() && portrait);
+}
+window.addEventListener('resize', updateRotateHint);
+window.addEventListener('orientationchange', updateRotateHint);
+
+function setMobileControlsVisible(show){
+  const el = document.getElementById('mobileControls');
+  if(!el) return;
+  el.classList.toggle('show', !!show && isMobileLayout());
+  updateRotateHint();
+}
+
+// ---------- Touch joystick + buttons ----------
+// Mirrors keyboard input rather than replacing input handling: buttons flip
+// the same `keys[...]` flags updatePlayer() already reads, and the joystick
+// feeds into the same mx/my blend as the gamepad stick. No duplicate logic.
+const touchMove = { x:0, y:0 };
+
+(function setupJoystick(){
+  const zone = document.getElementById('joystickZone');
+  const stick = document.getElementById('joystickStick');
+  if(!zone || !stick) return;
+  let activeId = null;
+  let cx = 0, cy = 0, radius = 1;
+
+  function start(e){
+    if(activeId !== null) return;
+    activeId = e.pointerId;
+    zone.setPointerCapture(activeId);
+    const rect = zone.getBoundingClientRect();
+    cx = rect.left + rect.width/2;
+    cy = rect.top + rect.height/2;
+    radius = rect.width/2;
+    zone.classList.add('active');
+    move(e);
+  }
+  function move(e){
+    if(e.pointerId !== activeId) return;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const d = Math.hypot(dx,dy) || 1;
+    if(d > radius){ dx = dx/d*radius; dy = dy/d*radius; }
+    stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    touchMove.x = clamp(dx/radius, -1, 1);
+    touchMove.y = clamp(dy/radius, -1, 1);
+  }
+  function end(e){
+    if(e.pointerId !== activeId) return;
+    activeId = null;
+    zone.classList.remove('active');
+    stick.style.transform = 'translate(-50%,-50%)';
+    touchMove.x = 0; touchMove.y = 0;
+  }
+  zone.addEventListener('pointerdown', start);
+  zone.addEventListener('pointermove', move);
+  zone.addEventListener('pointerup', end);
+  zone.addEventListener('pointercancel', end);
+})();
+
+// Press-and-hold button -> drives the same `keys[key]` flag the keyboard uses.
+function setupHoldButton(elId, key){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  let activeId = null;
+  el.addEventListener('pointerdown', (e) => {
+    activeId = e.pointerId;
+    el.setPointerCapture(activeId);
+    el.classList.add('pressed');
+    keys[key] = true;
+  });
+  const release = (e) => {
+    if(activeId !== null && e.pointerId !== activeId) return;
+    activeId = null;
+    el.classList.remove('pressed');
+    keys[key] = false;
+  };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+}
+setupHoldButton('fireBtn', 'e');
+setupHoldButton('missileBtn', 'q');
+setupHoldButton('flareBtn', 'f');
+setupHoldButton('nukeBtn', 'n');
+setupHoldButton('abShieldBtn', 'c');
+setupHoldButton('abPanicBtn', 'alt');
+setupHoldButton('abJamBtn', 'v');
+setupHoldButton('abBackupBtn', 'b');
+setupHoldButton('abHealBtn', 'h');
+
+// Ability/nuke buttons only make sense once unlocked/available — reflect
+// that each time a run starts (abilities are bought between runs) and
+// whenever the nuke charge count changes.
+function refreshMobileAbilityButtons(){
+  const map = [
+    ['abShieldBtn','shield_ability'],
+    ['abPanicBtn','missilepanic_ability'],
+    ['abJamBtn','commsjam_ability'],
+    ['abBackupBtn','backup_ability']
+  ];
+  for(const [id, abilityId] of map){
+    const el = document.getElementById(id);
+    if(el) el.classList.toggle('owned', hasAbility(abilityId));
+  }
+  const heal = document.getElementById('abHealBtn');
+  if(heal) heal.classList.add('owned'); // emergency heal has no purchase gate
+}
+function refreshMobileNukeButton(){
+  const el = document.getElementById('nukeBtn');
+  if(el) el.classList.toggle('avail', (player.nukeCharges||0) > 0);
+}
+
 let running = false;
 let score = 0, wave = 1;
 let corruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
@@ -712,6 +988,7 @@ function detectDevToolsOpen(){
          (window.outerHeight - window.innerHeight) > threshold;
 }
 function showCheatOverlay(strikes){
+  setMobileControlsVisible(false);
   const center = document.getElementById('center');
   center.classList.remove('hidden');
   const banState = getBanState();
@@ -2501,6 +2778,7 @@ function updatePlayer(){
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright']) mx+=1;
   if(gp){ mx += gp.mx; my += gp.my; }
+  mx += touchMove.x; my += touchMove.y;
   mx = clamp(mx,-1,1); my = clamp(my,-1,1);
   const len = Math.hypot(mx,my)||1;
   player.x += (mx/len)*player.speed;
@@ -2576,6 +2854,7 @@ function updatePlayer(){
  
   if(gp) gamepadPrev.tri = gp.triBtn;
   if(gp) gamepadPrev.sq = gp.sqBtn;
+  refreshMobileNukeButton();
  
   const lockEl = document.getElementById('lockind');
   lockEl.style.display = (player.missilePanicT<=0 && player.lockTarget && player.lockProgress>=40) ? 'block' : 'none';
@@ -3313,7 +3592,7 @@ function drawPlayer(){
     ctx.filter = `invert(${corruptionLevel * 50}%)`;
   }
   
-  const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright'];
+  const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']||(Math.abs(touchMove.x)>0.05||Math.abs(touchMove.y)>0.05);
   const equipped = getEquippedSkins();
   const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
   shipSkin.draw(ctx, thrusting);
@@ -3598,6 +3877,7 @@ function gameOver(){
   running = false;
   SFX.gameOver();
   syncCurrencyToServer();
+  setMobileControlsVisible(false);
   const center = document.getElementById('center');
   center.classList.remove('hidden');
   const savedName = getUsername() || 'PILOT';
@@ -3774,6 +4054,9 @@ async function resetGame(){
   document.getElementById('center').classList.add('hidden');
   startWave(1);
   running = true;
+  refreshMobileAbilityButtons();
+  refreshMobileNukeButton();
+  setMobileControlsVisible(true);
   requestAnimationFrame(loop);
 }
  
