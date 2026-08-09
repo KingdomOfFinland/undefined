@@ -1751,7 +1751,7 @@ const player = {
   rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0, wideRangeT:0, fireRateT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
   shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0,
-  nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0
+  nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0, onFireT:0, onFireDmgTick:0
 };
  
 function damagePlayer(amount){
@@ -1916,7 +1916,7 @@ function explodeEnemy(e){
 // damage on anything caught inside it.
 function spawnBlimpGas(e){
   gasClouds.push({ x:e.x, y:e.y, r: Math.max(e.w,e.h)/2+18, state:'gas',
-    igniteTimer: 450, fireTimer: 150, dmgTick: 0 });
+    igniteTimer: 450, fireTimer: 300, dmgTick: 0 });
 }
 function updateGasClouds(){
   gasClouds = gasClouds.filter(g=>{
@@ -1928,9 +1928,9 @@ function updateGasClouds(){
       g.fireTimer--;
       g.dmgTick--;
       if(g.dmgTick<=0){
-        g.dmgTick = 60; // once per second
+        g.dmgTick = 60; // once per second (allies only — player burn damage is handled by updatePlayerFire)
         if(dist(g,player) < g.r){
-          if(damagePlayer(5)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
+          player.onFireT = 150; // stays burning for another 2.5s even after leaving the cloud
         }
         for(const a of allies){
           if(a.alive && dist(g,a) < g.r) damageAlly(a,5);
@@ -1939,6 +1939,18 @@ function updateGasClouds(){
       return g.fireTimer > 0;
     }
   });
+}
+// Player "on fire" — set by touching Blimp fire, keeps ticking damage for a
+// bit even after stepping out of the gas cloud itself.
+function updatePlayerFire(){
+  if(player.onFireT>0){
+    player.onFireT--;
+    player.onFireDmgTick = (player.onFireDmgTick||0) - 1;
+    if(player.onFireDmgTick<=0){
+      player.onFireDmgTick = 60; // once per second
+      if(damagePlayer(5)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
+    }
+  }
 }
 function drawGasClouds(){
   for(const g of gasClouds){
@@ -3232,6 +3244,13 @@ function drawPlayer(){
     ctx.shadowColor = '#5ecbff'; ctx.shadowBlur = 10;
     ctx.beginPath(); ctx.arc(0,0,26*pulse,0,Math.PI*2); ctx.stroke();
   }
+  if(player.onFireT>0){
+    const flicker = 0.6 + Math.sin(frame*0.6)*0.2;
+    ctx.fillStyle = `rgba(255,120,20,${flicker})`;
+    ctx.beginPath(); ctx.arc(0,4,14,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = `rgba(255,220,80,${flicker*0.8})`;
+    ctx.beginPath(); ctx.arc(0,4,7,0,Math.PI*2); ctx.fill();
+  }
   ctx.restore();
 }
  
@@ -3418,6 +3437,7 @@ function render(){
   drawStars();
   drawFlares();
   drawBombs();
+  drawGasClouds();
   drawPowerups();
   drawLockLine();
   for(const e of enemies) drawEnemy(e);
@@ -3609,6 +3629,7 @@ function loop(){
   updateEnemies();
   updateAllies();
   updateGasClouds();
+  updatePlayerFire();
   updateCollisions();
   updatePowerups();
   if(godMode) player.hp = player.maxHp;
@@ -3650,6 +3671,7 @@ async function resetGame(){
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
   player.nukeCharges=0; player.nukeCd=0; player.nukeAwardedAt=0; player.empT=0;
+  player.onFireT=0; player.onFireDmgTick=0;
   document.getElementById('nukecount').textContent = 0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[]; gasClouds=[];
  
