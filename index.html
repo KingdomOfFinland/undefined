@@ -7,9 +7,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Undefined Fighter</title>
-
-<meta name="description" content="A Fighter plane game :)">
-<meta name="robots" content="index, follow">
 <style>
   :root { --accent1:#0ff; --accent2:#00ffcc; --accent-glow:rgba(0,255,200,0.15); --accent-border:#1a4a5a; }
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -297,13 +294,61 @@
     try{ await signOut(auth); return true; }
     catch(e){ console.error('Sign-out failed', e); return false; }
   };
+
+  // ---------- IP lookup + hashing ----------
+  // Used for the flagged-report log (raw ip, admin-only read) and for the
+  // ban system below (hashed, since the leaderboard is publicly readable
+  // and we don't want plaintext IPs sitting in a public node).
+  async function getClientIp(){
+    try{
+      const res = await fetch('https://api.ipify.org?format=json');
+      const j = await res.json();
+      return j.ip || 'unknown';
+    } catch(e){ return 'unknown'; }
+  }
+  function hashIp(ip){
+    const salted = 'uf_v1_' + (ip || 'unknown');
+    let h = 5381;
+    for(let i=0;i<salted.length;i++){
+      h = ((h*33) ^ salted.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(36);
+  }
+  window.__banMyIp = async function(hours){
+    try{
+      const ip = await getClientIp();
+      const key = hashIp(ip);
+      const now = Date.now();
+      await set(ref(db, 'bannedIPs/' + key), { until: now + hours*3600*1000, ts: now });
+      return true;
+    } catch(e){
+      console.error('ip ban write failed', e);
+      return false;
+    }
+  };
+  window.__checkIpBanned = async function(){
+    try{
+      const ip = await getClientIp();
+      const key = hashIp(ip);
+      const snap = await get(ref(db, 'bannedIPs/' + key));
+      if(!snap.exists()) return { banned:false };
+      const v = snap.val();
+      if(v.until && v.until > Date.now()) return { banned:true, until:v.until };
+      return { banned:false };
+    } catch(e){
+      console.error('ip ban check failed', e);
+      return { banned:false };
+    }
+  };
  
   window.__submitScore = async function(name, score, wave){
     try{
+      const ip = await getClientIp();
+      const ipKey = hashIp(ip);
       const lbRef = ref(db, 'leaderboard');
       const newEntryRef = push(lbRef);
       const now = Date.now();
-      await set(newEntryRef, { name: name.slice(0,12), score: Number(score) || 0, wave: Number(wave) || 0, ts: now, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
+      await set(newEntryRef, { name: name.slice(0,12), score: Number(score) || 0, wave: Number(wave) || 0, ts: now, ipKey, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
       return true;
     } catch(e){
       console.error('score submit failed', e);
@@ -370,13 +415,7 @@
  
   window.__submitFlagged = async function(name, score, wave, reason){
     try{
-      let ip = 'unknown';
-      try{
-        const res = await fetch('https://api.ipify.org?format=json');
-        const j = await res.json();
-        ip = j.ip || 'unknown';
-      } catch(e){ /* ip lookup optional, don't block on failure */ }
- 
+      const ip = await getClientIp();
       const flagRef = ref(db, 'flagged');
       const newEntryRef = push(flagRef);
       const now = Date.now();
@@ -488,7 +527,7 @@
     }
   };
 </script>
- <meta name="google-site-verification" content="7RfELVgSj9MOOtlKMuE2tX0aVuzMdu_N5KuLtRXbkq0" />
+ 
 </head>
 <body>
 <div id="wrap">
@@ -920,7 +959,7 @@ function wireAuthBar(){
   } else {
     btn.textContent = '🔐 Sign in with Google';
     btn.onclick = async () => { SFX.uiClick(); await doPlayerSignIn(); };
-    status.textContent = 'Not signed in — scores & currency won\'t save';
+    status.textContent = 'Not signed in — currency sync won\'t save (leaderboard is fine)';
     status.classList.add('signedout');
   }
 }
@@ -1106,6 +1145,7 @@ function addCheatStrike(){
   if(n>=5){
     localStorage.setItem('uf_ban_until', String(Date.now()+24*60*60*1000));
     localStorage.setItem('uf_cheat_strikes','0'); // ban issued — strikes reset for the next 24h window
+    if(window.__banMyIp) window.__banMyIp(24).catch(()=>{}); // real server-side IP ban, not just this browser
   } else {
     localStorage.setItem('uf_cheat_strikes', String(n));
   }
@@ -4067,21 +4107,6 @@ function gameOver(){
   };
   document.getElementById('submitScoreBtn').onclick = async () => {
     SFX.uiClick();
-    const btn = document.getElementById('submitScoreBtn');
-    if(!currentUser){
-      btn.disabled = true; btn.textContent = 'SIGN IN TO SUBMIT...';
-      const user = await doPlayerSignIn();
-      if(!user){
-        btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
-        alert('Sign-in was cancelled or failed — score not submitted.');
-        return;
-      }
-      // currentUser gets set by the uf-authchanged event, but that can land
-      // a tick after this await resolves — set it directly too so the rest
-      // of this click doesn't race the event.
-      currentUser = user;
-      btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
-    }
     const nameEl = document.getElementById('nameInput');
     const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
  
@@ -5518,10 +5543,18 @@ const centerObserver = new MutationObserver(() => {
   navFocusIndex = 0;
   applyNavFocusStyle();
 });
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const center = document.getElementById('center');
   if(center) centerObserver.observe(center, { childList:true, subtree:true });
   applyDisplaySettings();
+  // Check the server-side (IP-hash) ban before trusting localStorage alone —
+  // otherwise clearing site data would be enough to dodge a real ban.
+  if(window.__checkIpBanned){
+    try{
+      const res = await window.__checkIpBanned();
+      if(res && res.banned) localStorage.setItem('uf_ban_until', String(res.until));
+    } catch(e){ /* fall back to local state below */ }
+  }
   const banState = getBanState();
   if(banState.banned) showCheatOverlay(0);
 });
