@@ -55,6 +55,18 @@
   #dailyBtn.claimed { background:#345; color:#789; box-shadow:none; cursor:default; }
   #dailyBtn.claimed:hover { background:#345; }
   .hidden { display:none !important; }
+  #versionBanner {
+    position:fixed; top:0; left:0; width:100%; z-index:200;
+    background:#0af; color:#001; font-size:13px; font-weight:bold;
+    display:flex; align-items:center; justify-content:center; gap:12px;
+    padding:8px 12px; box-shadow:0 0 12px rgba(0,180,255,0.6);
+    text-shadow:none;
+  }
+  #versionBanner button {
+    padding:4px 12px; font-size:12px; box-shadow:none;
+    background:#001; color:#0ff;
+  }
+  #versionBanner button:hover { background:#124; }
   #lbList, #curLbList {
     list-style:none; width:100%; text-align:left;
     font-size:12px; max-height:220px; overflow-y:auto;
@@ -252,6 +264,40 @@
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
   const auth = getAuth(app);
+
+  // ---- Version check ----
+  // Bump GAME_VERSION here every time you deploy. The 'gameVersion' node in
+  // Firebase is updated to match (via __setGameVersion in the console, or by
+  // hand in the Firebase console) right after deploying. Any client whose
+  // baked-in GAME_VERSION no longer matches the live value gets a banner
+  // telling them to refresh — this is a live listener (onValue), so it fires
+  // even for a tab that's already open, not just on next load.
+  window.__GAME_VERSION = "1.0.0";
+  function showVersionBanner(serverVersion){
+    const banner = document.getElementById('versionBanner');
+    const text = document.getElementById('versionBannerText');
+    if(!banner || !text) return;
+    text.textContent = `You're on v${window.__GAME_VERSION} — v${serverVersion} is out. Refresh to update.`;
+    banner.classList.remove('hidden');
+  }
+  onValue(ref(db, 'gameVersion'), (snap) => {
+    const serverVersion = snap.val();
+    if(!serverVersion) return; // not set yet — nothing to compare against
+    if(String(serverVersion) !== String(window.__GAME_VERSION)) showVersionBanner(serverVersion);
+  });
+  // Console helper for deploying: __setGameVersion("1.0.1") after pushing a
+  // new build. Every open client (and every future page load) will then see
+  // the "update available" banner until they refresh onto the new version.
+  window.__setGameVersion = async function(v){
+    try{
+      await set(ref(db, 'gameVersion'), String(v));
+      console.log(`gameVersion set to "${v}". Clients on an older baked-in version will now see the update banner.`);
+      return true;
+    } catch(e){
+      console.error('set game version failed', e);
+      return false;
+    }
+  };
   window.__currentUid = null;
   window.__currentUser = null;
  
@@ -611,6 +657,10 @@
  
 </head>
 <body>
+<div id="versionBanner" class="hidden">
+  <span id="versionBannerText">A newer version is available.</span>
+  <button id="versionBannerRefresh">REFRESH</button>
+</div>
 <div id="wrap">
   <canvas id="game" width="1366" height="768"></canvas>
   <div id="hud">
@@ -4220,6 +4270,7 @@ function gameOver(){
   document.getElementById('submitScoreBtn').onclick = async () => {
     SFX.uiClick();
     const nameEl = document.getElementById('nameInput');
+    const btn = document.getElementById('submitScoreBtn');
     const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
  
     // if this is a different name than the saved one, it needs to be claimed first
@@ -4427,6 +4478,7 @@ window.addEventListener('keydown', (e) => {
       console.log('  devEditLb(id, changes) - edit a leaderboard entry, e.g. devEditLb("-Nabc123", {score:500})');
       console.log('  devFlagTrig(id, reason)- manually flag an existing leaderboard entry by id');
       console.log('  devGameEdit(opts)      - edit live game state, e.g. devGameEdit({hp:100, flares:5})');
+      console.log('  __setGameVersion(v)    - push a new live version, e.g. __setGameVersion("1.0.1") after deploying');
       alert('Dev mode enabled. Check the browser console for available commands.');
       const ind = document.getElementById('devIndicator');
       if(ind) ind.style.display = 'block';
@@ -5762,6 +5814,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   const banState = getBanState();
   if(banState.banned) showCheatOverlay(0);
+  const versionRefreshBtn = document.getElementById('versionBannerRefresh');
+  if(versionRefreshBtn) versionRefreshBtn.onclick = () => location.reload();
 });
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
