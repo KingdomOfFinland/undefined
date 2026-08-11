@@ -113,7 +113,7 @@
     background:rgba(0,5,10,0.97); display:flex; flex-direction:column;
     align-items:center; gap:10px; z-index:60; padding:16px; overflow-y:auto;
   }
-  .skinTabs { display:flex; gap:8px; }
+  .skinTabs { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:640px; }
   .skinTab {
     background:#0a2a35; color:#8cf; border:1px solid #145; padding:6px 14px;
     font-family:inherit; font-size:12px; cursor:pointer;
@@ -236,7 +236,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
@@ -525,6 +525,87 @@
       console.error('fetch black market stock failed', e);
       return null;
     }
+  };
+
+  // ---------- Player-to-player donations ----------
+  // Donations are queued at donations/{recipientKey}/{pushId} rather than added
+  // directly to currency/{key}, because currency/{key} is a full overwrite
+  // written by syncCurrencyToServer from whatever the recipient's local
+  // balances happen to be — a direct increment there could get clobbered by
+  // the next stale sync. Queuing means the recipient's own client applies the
+  // gift to its local balances (which then flow into their next sync) and
+  // clears the queue entry, so there's no overwrite race either way.
+  window.__sendDonation = async function(fromName, toName, coins, cash, nuggets){
+    try{
+      const toKey = normalizeName(toName).toLowerCase();
+      if(!toKey) return { ok:false, reason:'empty' };
+      const fromKey = normalizeName(fromName || '').toLowerCase();
+      if(toKey === fromKey) return { ok:false, reason:'self' };
+      const taken = await window.__isUsernameTaken(toName);
+      if(!taken) return { ok:false, reason:'notfound' };
+      const donRef = push(ref(db, 'donations/' + toKey));
+      const now = Date.now();
+      await set(donRef, {
+        from: (fromName || 'PILOT').slice(0,12),
+        coins: Number(coins) || 0,
+        cash: Number(cash) || 0,
+        nuggets: Number(nuggets) || 0,
+        ts: now
+      });
+      return { ok:true };
+    } catch(e){
+      console.error('donation send failed', e);
+      return { ok:false, reason:'error' };
+    }
+  };
+
+  // Claims every pending donation queued for `name`, deletes them from the
+  // db, and returns the summed totals plus who they were from (for a toast).
+  // One-shot fallback for callers that just want a manual check.
+  window.__claimDonations = async function(name){
+    try{
+      const key = normalizeName(name || '').toLowerCase();
+      if(!key) return { coins:0, cash:0, nuggets:0, from:[] };
+      const qRef = ref(db, 'donations/' + key);
+      const snap = await get(qRef);
+      if(!snap.exists()) return { coins:0, cash:0, nuggets:0, from:[] };
+      let coins=0, cash=0, nuggets=0; const from=[];
+      snap.forEach(child => {
+        const v = child.val();
+        coins += Number(v.coins)||0; cash += Number(v.cash)||0; nuggets += Number(v.nuggets)||0;
+        if(v.from) from.push(v.from);
+      });
+      await remove(qRef);
+      return { coins, cash, nuggets, from };
+    } catch(e){
+      console.error('donation claim failed', e);
+      return { coins:0, cash:0, nuggets:0, from:[] };
+    }
+  };
+
+  // Live donation watcher — same currency/{key} node the rest of the game
+  // syncs to is a full-overwrite mirror of local balances, so it updates
+  // "live" only in the sense that syncCurrencyToServer() pushes fresh totals
+  // often. Donations queue separately at donations/{key}, and this listener
+  // makes THAT live too: onValue fires the instant a gift is written, even
+  // if the recipient is mid-run and never touches the Hangar or re-signs-in.
+  // Returns an unsubscribe function.
+  window.__watchDonations = function(name, onGift){
+    const key = normalizeName(name || '').toLowerCase();
+    if(!key) return () => {};
+    const qRef = ref(db, 'donations/' + key);
+    const unsub = onValue(qRef, (snap) => {
+      if(!snap.exists()) return;
+      let coins=0, cash=0, nuggets=0; const from=[];
+      snap.forEach(child => {
+        const v = child.val();
+        coins += Number(v.coins)||0; cash += Number(v.cash)||0; nuggets += Number(v.nuggets)||0;
+        if(v.from) from.push(v.from);
+      });
+      remove(qRef).catch(e => console.error('donation queue clear failed', e));
+      onGift({ coins, cash, nuggets, from });
+    }, (e) => console.error('donation watch failed', e));
+    return unsub;
   };
 </script>
  
@@ -935,10 +1016,41 @@ window.addEventListener('orientationchange', updateRotateHint);
 // count.
 let currentUser = null;
 if(window.__currentUser) currentUser = window.__currentUser;
+let donationWatchUnsub = null;
+let donationWatchName = null;
 window.addEventListener('uf-authchanged', (e) => {
   currentUser = e.detail || null;
   wireAuthBar();
+  if(currentUser) startDonationWatch();
+  else stopDonationWatch();
 });
+
+// Applies an incoming gift (from either the live watcher or a manual check)
+// to local balances, shows a toast, and pushes the new totals up.
+function applyDonationGift(gift){
+  if(!gift || (!gift.coins && !gift.cash && !gift.nuggets)) return;
+  if(gift.coins) addCoins(gift.coins);
+  if(gift.cash) addCash(gift.cash);
+  if(gift.nuggets) addNuggets(gift.nuggets);
+  const senders = [...new Set(gift.from)].join(', ');
+  alert(`💌 You received a donation from ${senders || 'a fellow pilot'}: 🪙${gift.coins} 💵${gift.cash} 🐔${gift.nuggets}`);
+  syncCurrencyToServer();
+}
+
+// Attaches a realtime listener for incoming donations to this callsign so
+// gifts land the moment they're sent, not just next time we check. Safe to
+// call repeatedly — re-attaches only if the callsign actually changed.
+function startDonationWatch(){
+  const name = getUsername();
+  if(!name || !window.__watchDonations) return;
+  if(donationWatchName === name && donationWatchUnsub) return;
+  stopDonationWatch();
+  donationWatchUnsub = window.__watchDonations(name, applyDonationGift);
+  donationWatchName = name;
+}
+function stopDonationWatch(){
+  if(donationWatchUnsub){ donationWatchUnsub(); donationWatchUnsub = null; donationWatchName = null; }
+}
 async function doPlayerSignIn(){
   if(!window.__playerSignIn){ return null; }
   const btn = document.getElementById('googleSignInBtn');
@@ -4435,6 +4547,7 @@ function getUsername(){
 }
 function setUsername(name){
   localStorage.setItem('uf_username', name);
+  if(currentUser) startDonationWatch();
 }
 async function ensureUsername(){
   let name = getUsername();
@@ -4821,6 +4934,7 @@ function openSkinsScreen(){
       <span>🐔 <span id="hangarNuggets">0</span></span>
       <button id="convertBtn" style="font-size:11px; padding:4px 8px;">CONVERT 100 🪙 → 1 💵</button>
       <button id="convertNuggetsBtn" style="font-size:11px; padding:4px 8px;">CONVERT 🪙 → 🐔 x2</button>
+      <button id="donateBtn" style="font-size:11px; padding:4px 8px;">💌 DONATE</button>
     </div>
     <div class="skinTabs" id="skinTabs"></div>
     <div id="skinsGrid"></div>
@@ -4845,6 +4959,10 @@ function openSkinsScreen(){
   overlay.querySelector('#convertNuggetsBtn').onclick = () => {
     if(convertCoinsToNuggets()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
     renderCurrency();
+  };
+  overlay.querySelector('#donateBtn').onclick = () => {
+    SFX.uiClick();
+    openDonateScreen(renderCurrency);
   };
  
   // Builds one skin card — used both by the normal per-category tabs and by
@@ -5418,6 +5536,93 @@ function openSkinsScreen(){
   overlay.querySelector('#skinsCloseBtn').onclick = () => {
     SFX.uiClick();
     wrap.removeChild(overlay);
+  };
+}
+
+// Small modal for sending coins/cash/nuggets to another player by username.
+// Spends locally first, then queues the gift server-side for the recipient
+// to claim (see __sendDonation / claimIncomingDonations) — if the send call
+// fails, the spent amount is refunded locally so nothing is lost.
+function openDonateScreen(onDone){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'donateOverlay';
+  overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:70; padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
+      <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 12px;">DONATE TO PILOT</h2>
+      <div style="font-size:11px; color:#8cf; margin-bottom:10px;">Your balance: 🪙<span id="donFromCoins"></span> 💵<span id="donFromCash"></span> 🐔<span id="donFromNuggets"></span></div>
+      <input id="donTarget" placeholder="Recipient callsign" maxlength="12" style="width:100%; box-sizing:border-box; margin-bottom:8px; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+      <div style="display:flex; gap:6px; margin-bottom:8px;">
+        <input id="donCoins" type="number" min="0" value="0" placeholder="🪙" style="width:33%; box-sizing:border-box; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+        <input id="donCash" type="number" min="0" value="0" placeholder="💵" style="width:33%; box-sizing:border-box; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+        <input id="donNuggets" type="number" min="0" value="0" placeholder="🐔" style="width:34%; box-sizing:border-box; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+      </div>
+      <div id="donStatus" style="font-size:10px; color:#f88; min-height:14px; margin-bottom:8px;"></div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button id="donSendBtn">SEND</button>
+        <button id="donCancelBtn">CANCEL</button>
+      </div>
+    </div>
+  `;
+  wrap.appendChild(overlay);
+
+  const statusEl = overlay.querySelector('#donStatus');
+  const refreshBalances = () => {
+    overlay.querySelector('#donFromCoins').textContent = getCoins();
+    overlay.querySelector('#donFromCash').textContent = getCash();
+    overlay.querySelector('#donFromNuggets').textContent = getNuggets();
+  };
+  refreshBalances();
+
+  function close(){
+    wrap.removeChild(overlay);
+    if(onDone) onDone();
+  }
+  overlay.querySelector('#donCancelBtn').onclick = () => { SFX.uiClick(); close(); };
+
+  overlay.querySelector('#donSendBtn').onclick = async () => {
+    const targetRaw = overlay.querySelector('#donTarget').value.trim();
+    const coins = Math.max(0, parseInt(overlay.querySelector('#donCoins').value, 10) || 0);
+    const cash = Math.max(0, parseInt(overlay.querySelector('#donCash').value, 10) || 0);
+    const nuggets = Math.max(0, parseInt(overlay.querySelector('#donNuggets').value, 10) || 0);
+    const myName = getUsername();
+
+    if(!currentUser){ statusEl.textContent = 'Sign in with Google first to donate.'; return; }
+    if(!myName){ statusEl.textContent = 'Set a callsign first.'; return; }
+    if(!targetRaw){ statusEl.textContent = 'Enter a recipient callsign.'; return; }
+    if(targetRaw.toLowerCase() === myName.toLowerCase()){ statusEl.textContent = "You can't donate to yourself."; return; }
+    if(coins===0 && cash===0 && nuggets===0){ statusEl.textContent = 'Enter an amount to send.'; return; }
+    if(coins > getCoins() || cash > getCash() || nuggets > getNuggets()){ statusEl.textContent = "You don't have that much to give."; return; }
+    if(!window.__sendDonation){ statusEl.textContent = 'Donations unavailable right now.'; return; }
+
+    const btn = overlay.querySelector('#donSendBtn');
+    btn.disabled = true; statusEl.style.color = '#8cf'; statusEl.textContent = 'Sending...';
+
+    // Spend first so the player can't submit twice while the request is in flight.
+    if(coins) spendCoins(coins);
+    if(cash) spendCash(cash);
+    if(nuggets) spendNuggets(nuggets);
+
+    const result = await window.__sendDonation(myName, targetRaw, coins, cash, nuggets);
+
+    if(result.ok){
+      SFX.powerupPickup();
+      syncCurrencyToServer();
+      statusEl.style.color = '#0f8';
+      statusEl.textContent = `Sent to ${targetRaw}!`;
+      refreshBalances();
+      setTimeout(close, 900);
+    } else {
+      // Refund on any failure — recipient not found, network error, etc.
+      if(coins) addCoins(coins);
+      if(cash) addCash(cash);
+      if(nuggets) addNuggets(nuggets);
+      btn.disabled = false;
+      statusEl.style.color = '#f88';
+      statusEl.textContent = result.reason === 'notfound' ? `No pilot named "${targetRaw}" found.` : 'Donation failed — try again.';
+      refreshBalances();
+    }
   };
 }
 function openOnScreenKeyboard(initialValue, onDone){
