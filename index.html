@@ -681,6 +681,17 @@
   <div id="lockind">LOCK ACQUIRED - HOLD Q</div>
   <div id="wavecall"></div>
   <div id="devIndicator" style="position:absolute;bottom:6px;left:6px;font-size:11px;color:#0f8;text-shadow:0 0 6px #0f8;display:none;pointer-events:none;">⚙ DEV MODE</div>
+  <div id="testModeIndicator" style="position:absolute;bottom:6px;left:6px;font-size:11px;color:#fc0;text-shadow:0 0 6px #fc0;display:none;pointer-events:none;">🔧 TEST MODE (devtools unlocked)</div>
+  <div id="testSceneSelectorWrap" style="position:absolute;bottom:26px;left:6px;display:none;z-index:9999;">
+    <select id="testSceneSelect" style="font-size:11px;background:#111;color:#fc0;border:1px solid #fc0;">
+      <option value="">— jump to scene —</option>
+      <option value="start">Start</option>
+      <option value="leaderboard">Leaderboard</option>
+      <option value="shotdown">Shot Down</option>
+      <option value="hangar">Hangar / Skins</option>
+      <option value="cheat">Cheat / Banned overlay</option>
+    </select>
+  </div>
   <div id="gpIndicator" style="position:absolute;bottom:6px;right:6px;font-size:11px;color:#0af;text-shadow:0 0 6px #0af;display:none;pointer-events:none;">🎮 CONTROLLER CONNECTED</div>
 
   <div id="mobileControls">
@@ -741,6 +752,11 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height; // fixed world resolution — game logic never changes
+
+// Snapshot of the untouched start-screen markup, captured before any script
+// overwrites #center — used by the test-mode scene selector to jump back to
+// the start screen for preview purposes without touching real game state.
+const START_SCREEN_HTML = document.getElementById('center').innerHTML;
  
 // ---------- Resolution scaling (per-device) ----------
 // The game always THINKS in a 1366x768 world (W/H above). We just render that
@@ -1285,9 +1301,30 @@ let cheatFlagged = false;
 let cheatReason = '';
 let killsThisRun = 0;
 let devMode = false;
+let testMode = false;
 let betaUnlocked = false;
 let godMode = false;
 const DEV_PASSWORD = "CHANGE_ME"; // <-- set your own password here
+
+// ---------- Test Mode (Ctrl+Alt+C) ----------
+// No password, no admin write access — this just lets you open devtools
+// (e.g. to inspect the Firebase WebSocket frames) without tripping the
+// anti-cheat overlay or burning a strike. Submission itself is untouched —
+// SUBMIT SCORE still calls __submitScore normally, so the real write
+// (and any PERMISSION_DENIED) still hits Firebase for real, for debugging.
+window.addEventListener('keydown', (e) => {
+  if(e.ctrlKey && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'c'){
+    e.preventDefault();
+    testMode = !testMode;
+    const ind = document.getElementById('testModeIndicator');
+    if(ind) ind.style.display = testMode ? 'block' : 'none';
+    const selWrap = document.getElementById('testSceneSelectorWrap');
+    if(selWrap) selWrap.style.display = testMode ? 'block' : 'none';
+    console.log(testMode
+      ? '%c[TEST MODE ON] DevTools detection disabled for this session.'
+      : '%c[TEST MODE OFF]', 'color:#fc0;font-weight:bold;');
+  }
+});
  
 // ---------- Anti-cheat: devtools detection ----------
 // Heuristic-only (window-size diff for docked devtools) — not foolproof
@@ -1341,7 +1378,7 @@ function showCheatOverlay(strikes){
   if(btn) btn.onclick = () => { SFX.uiClick(); resetGame(); };
 }
 function triggerDevToolsCheat(){
-  if(devMode || cheatDetectedThisRun) return;
+  if(devMode || testMode || cheatDetectedThisRun) return;
   cheatDetectedThisRun = true;
   cheatFlagged = true;
   cheatReason = 'DEVTOOLS OPENED WITHOUT DEV MODE';
@@ -1359,7 +1396,7 @@ setInterval(() => {
 // keystroke from doing anything else, and the attempt itself is treated as
 // the same violation as devtools actually being open.
 window.addEventListener('keydown', (e) => {
-  if(devMode) return;
+  if(devMode || testMode) return;
   const key = e.key.toLowerCase();
   const isDevToolsKey = key === 'f12' ||
     (e.ctrlKey && e.shiftKey && ['c','i','j','k'].includes(key)) ||
@@ -4398,6 +4435,145 @@ async function resetGame(){
  
 document.getElementById('startBtn').onclick = () => { SFX.uiClick(); resetGame(); };
 document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+
+// ---------- Test-mode scene selector (Ctrl+Alt+C) ----------
+// Re-wires the start screen after its markup gets restored from a preview
+// jump. Duplicates the one-off handlers set up above/below rather than
+// touching those, so normal startup flow stays untouched.
+function wireStartScreen(){
+  const startBtn = document.getElementById('startBtn');
+  if(startBtn) startBtn.onclick = () => { SFX.uiClick(); resetGame(); };
+  const skinsBtn = document.getElementById('skinsBtnStart');
+  if(skinsBtn) skinsBtn.onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+  const dailyBtnEl = document.getElementById('dailyBtn');
+  if(dailyBtnEl){
+    dailyBtnEl.onclick = () => {
+      const result = claimDailyBonus();
+      if(!result){ SFX.shieldBlock(); return; }
+      SFX.powerupPickup();
+      updateDailyBtnState();
+      showDailyResultModal(result.streak, result.reward);
+    };
+  }
+  updateDailyBtnState();
+  const toggleBtn = document.getElementById('touchToggleBtn');
+  if(toggleBtn){
+    toggleBtn.onclick = () => {
+      SFX.uiClick();
+      const order = ['auto','on','off'];
+      const next = order[(order.indexOf(getTouchPref())+1) % order.length];
+      setTouchPref(next);
+      updateTouchToggleBtnLabel();
+      updateControlsInfoText();
+      updateRotateHint();
+    };
+  }
+  updateTouchToggleBtnLabel();
+  updateControlsInfoText();
+  wireAuthBar();
+}
+
+// Preview-only "SHOT DOWN" screen — same markup/behavior as gameOver()'s
+// screen (including a real, working SUBMIT SCORE that hits Firebase for
+// real, useful for debugging submission), but it does NOT call updateStats,
+// syncCurrencyToServer, or SFX.gameOver — so previewing this scene never
+// touches real player stats or currency.
+function devShowShotDownPreview(){
+  running = false;
+  setMobileControlsVisible(false);
+  const center = document.getElementById('center');
+  center.classList.remove('hidden');
+  const savedName = getUsername() || 'PILOT';
+  center.innerHTML = `
+    <h1 style="color:#f55;text-shadow:0 0 12px #f00;">SHOT DOWN</h1>
+    <p>Final score: <b>${score}</b> — Reached wave ${wave}</p>
+    <input id="nameInput" maxlength="12" value="${savedName}">
+    <a href="#" id="changeNameLink" style="font-size:11px;color:#8cf;">change callsign</a>
+    <button id="submitScoreBtn">SUBMIT SCORE</button>
+    <button id="restartBtn">RELAUNCH</button>
+    <button id="skinsBtnGO">SKINS</button>
+    <div id="authBar">
+      <button id="googleSignInBtn">🔐 Sign in with Google</button>
+      <span id="authStatus" class="signedout"></span>
+    </div>
+    <div class="lbCorner lbCornerLeft">
+      <h2 style="color:#0ff;">TOP PILOTS</h2>
+      <ul id="lbList"><li>Loading...</li></ul>
+    </div>
+    <div class="lbCorner lbCornerRight">
+      <h2 style="color:#ffd23d;">RICHEST PILOTS — TOP 5 🪙💵🐔</h2>
+      <ul id="curLbList"><li>Loading...</li></ul>
+    </div>
+    <div id="flagSection" style="display:none;">
+      <h2 style="font-size:12px;color:#f66;">🚩 FLAGGED</h2>
+      <ul id="flagList"></ul>
+    </div>
+  `;
+  loadLeaderboard();
+  loadCurrencyLeaderboard();
+  loadFlagged();
+  wireAuthBar();
+  document.getElementById('restartBtn').onclick = () => { SFX.uiClick(); resetGame(); };
+  document.getElementById('skinsBtnGO').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+  document.getElementById('changeNameLink').onclick = (e) => {
+    e.preventDefault();
+    SFX.uiClick();
+    const nameEl = document.getElementById('nameInput');
+    nameEl.value = '';
+    nameEl.focus();
+  };
+  document.getElementById('submitScoreBtn').onclick = async () => {
+    SFX.uiClick();
+    const nameEl = document.getElementById('nameInput');
+    const btn = document.getElementById('submitScoreBtn');
+    const name = (nameEl.value || 'ANON').trim().slice(0,12) || 'ANON';
+    if(name.toLowerCase() !== (getUsername()||'').toLowerCase()){
+      btn.disabled = true; btn.textContent = 'CHECKING NAME...';
+      const claim = window.__claimUsername ? await window.__claimUsername(name) : { ok:true };
+      if(!claim.ok){
+        alert(`Callsign "${name}" is already taken. Pick another.`);
+        btn.disabled = false; btn.textContent = 'SUBMIT SCORE';
+        return;
+      }
+    }
+    setUsername(name);
+    btn.disabled = true; btn.textContent = 'SUBMITTING...';
+    const ok = window.__submitScore ? await window.__submitScore(name, score, wave) : false;
+    btn.textContent = ok ? 'SUBMITTED ✓' : 'FAILED — RETRY';
+    if(ok) loadLeaderboard(); else btn.disabled = false;
+  };
+}
+
+const testSceneSelectEl = document.getElementById('testSceneSelect');
+if(testSceneSelectEl){
+  testSceneSelectEl.addEventListener('change', (e) => {
+    const val = e.target.value;
+    e.target.value = '';
+    if(!val || !testMode) return;
+    const existingSkinsOverlay = document.getElementById('skinsOverlay');
+    if(existingSkinsOverlay) existingSkinsOverlay.remove();
+    if(val === 'start' || val === 'leaderboard'){
+      // Leaderboard has no separate full-screen view — it's the corner
+      // panels that live on the start screen, so both jump there.
+      running = false;
+      setMobileControlsVisible(false);
+      const center = document.getElementById('center');
+      center.classList.remove('hidden');
+      center.innerHTML = START_SCREEN_HTML;
+      wireStartScreen();
+      loadLeaderboard();
+      loadCurrencyLeaderboard();
+      loadFlagged();
+    } else if(val === 'shotdown'){
+      devShowShotDownPreview();
+    } else if(val === 'hangar'){
+      openSkinsScreen();
+    } else if(val === 'cheat'){
+      running = false;
+      showCheatOverlay(Math.min(5, getCheatStrikes() + 1));
+    }
+  });
+}
 
 function updateDailyBtnState(){
   const btn = document.getElementById('dailyBtn');
