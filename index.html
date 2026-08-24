@@ -2750,9 +2750,9 @@ function maybeDropPowerup(e){
  
 function awardKillCoins(e){
   if(e.isBoss){
-    addCoins(Math.round(rand(40, 60)));  // 50 coins ± 10
+    addCoins(Math.round(rand(40, 60) * getKillMult()));  // 50 coins ± 10, scaled by kill mult
   } else {
-    addCoins((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1);
+    addCoins(Math.round(((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1) * getKillMult()));
   }
 }
  
@@ -2961,7 +2961,7 @@ function spawnEnemy(type){
   } else if(type==='uav'){
     // Snipes down player missiles with its own interceptor missiles instead
     // of ever firing at the player directly.
-    Object.assign(base,{ hp:250, maxHp:250, w:34,h:14, speed:2, scoreVal:180,
+    Object.assign(base,{ hp:125, maxHp:125, w:34,h:14, speed:2, scoreVal:180,
       shieldHp:25, shieldMax:25, shieldHitTimer:0, interceptCd: rand(90,150) });
   } else if(type==='helicopter'){
     // Same HP as the base Fighter — just a much slower, sparser missile threat.
@@ -3038,7 +3038,8 @@ function startWave(w){
 function tryFireGun(){
   if(player.fireCd>0) return;
   let cd = player.rapidFireT>0 ? 4 : 8;
-  if(player.fireRateT>0) cd = Math.max(1, Math.round(cd*0.875)); // +12.5% fire rate
+  if(player.fireRateT>0) cd = Math.max(1, Math.round(cd*0.875)); // +12.5% fire rate (power-up)
+  cd = Math.max(1, Math.round(cd * (1 - getUpgradeBonus('upg_firerate')))); // permanent fire-rate upgrade, stacks
   player.fireCd = cd;
   SFX.shoot();
   bullets.push({ x:player.x, y:player.y-20, vx:0, vy:-12, w:4,h:10, side:'player' });
@@ -3702,6 +3703,10 @@ function updateEnemies(){
  
 function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
  
+// Run kill multiplier: +0.1x per 100 kills this run. Persists through a
+// second-chance revive (killsThisRun only resets in resetGame), resets on death.
+function getKillMult(){ return 1 + Math.floor(killsThisRun/100)*0.1; }
+ 
 function addScore(amount){
   killsThisRun++;
   const now = performance.now();
@@ -3714,7 +3719,7 @@ function addScore(amount){
     cheatReason = 'DEVTOOLS/HACK USED (single gain > 2000)';
   }
  
-  const finalAmount = player.scoreMultT>0 ? amount*2 : amount;
+  const finalAmount = Math.round((player.scoreMultT>0 ? amount*2 : amount) * getKillMult());
   scoreLog.push({ delta: finalAmount, ts: now, frame });
   if(scoreLog.length > 50) scoreLog.shift();
  
@@ -4403,6 +4408,8 @@ async function resetGame(){
   score=0; wave=1;
   dyingTimer = 0;
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0; cheatDetectedThisRun = false;
+  player.maxHp = Math.round(PLAYER_BASE_HP * (1 + getUpgradeBonus('upg_hp')));
+  player.speed = PLAYER_BASE_SPEED * (1 + getUpgradeBonus('upg_speed'));
   player.hp=player.maxHp; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
@@ -4895,6 +4902,26 @@ function navGamepadTick(){
 }
 navGamepadTick();
  
+// ---------- Player Upgrades (leveled, toggleable, cost doubles per level) ----------
+const PLAYER_BASE_HP = 150;
+const PLAYER_BASE_SPEED = 5.8;
+const UPGRADE_DEFS = [
+  { id:'upg_hp', name:'Reinforced Hull', statLabel:'Max HP', desc:'+15% max HP per level, up to +45%.', costType:'coins', baseCost:300, perLevel:0.15, maxLevel:3, color:'#4ecdc4' },
+  { id:'upg_speed', name:'Afterburner', statLabel:'Speed', desc:'+4.17% speed per level, up to +12.5%.', costType:'coins', baseCost:250, perLevel:0.0416667, maxLevel:3, color:'#ffd23d' },
+  { id:'upg_firerate', name:'Rapid Cycler', statLabel:'Fire Rate', desc:'+12.5% fire rate per level, up to +37.5%. Stacks with the rapid-fire power-up.', costType:'cash', baseCost:15, perLevel:0.125, maxLevel:3, color:'#ff3d5c' }
+];
+function getUpgradeLevel(id){ return parseInt(localStorage.getItem('uf_upgrade_lvl_'+id)||'0',10) || 0; }
+function setUpgradeLevel(id, lvl){ localStorage.setItem('uf_upgrade_lvl_'+id, String(lvl)); }
+function getUpgradeEnabled(id){ return localStorage.getItem('uf_upgrade_on_'+id) !== '0'; } // default ON once owned
+function setUpgradeEnabled(id, on){ localStorage.setItem('uf_upgrade_on_'+id, on ? '1' : '0'); }
+function upgradeNextCost(def, lvl){ return def.baseCost * Math.pow(2, lvl); } // cost doubles each purchase
+// Effective bonus fraction (0 if not owned or toggled off) — applied at run start / on fire.
+function getUpgradeBonus(id){
+  const def = UPGRADE_DEFS.find(d => d.id===id);
+  if(!def || !getUpgradeEnabled(id)) return 0;
+  return getUpgradeLevel(id) * def.perLevel;
+}
+ 
 // ---------- Skins Selection Screen ----------
 const ABILITY_DEFS = [
   { id:'shield_ability', name:'Shield Burst', desc:'On-demand 6s shield. Cooldown 20s.', costType:'coins', cost:400, keyLabel:'C', gpLabel:'RT', color:'#5ecbff' },
@@ -5115,6 +5142,7 @@ function openSkinsScreen(){
   overlay.id = 'skinsOverlay';
  
   const categories = [
+    { key:'upgrades', label:'UPGRADES', upgrades:true },
     { key:'abilities', label:'ABILITIES', abilities:true },
     { key:'blackmarket', label:'BLACK MARKET', blackmarket:true },
     { key:'display', label:'DISPLAY', display:true },
@@ -5330,6 +5358,78 @@ function openSkinsScreen(){
     const equipped = getEquippedSkins();
     const cat = categories.find(c => c.key===activeCat);
  
+    if(cat.upgrades){
+      UPGRADE_DEFS.forEach(up => {
+        const lvl = getUpgradeLevel(up.id);
+        const maxed = lvl >= up.maxLevel;
+        const enabled = getUpgradeEnabled(up.id);
+        const bonusPct = Math.round(lvl * up.perLevel * 1000) / 10;
+        const maxPct = Math.round(up.maxLevel * up.perLevel * 1000) / 10;
+
+        const card = document.createElement('div');
+        card.className = 'skinCard' + (lvl>0 && enabled ? ' equipped' : '');
+        card.style.padding = '10px';
+
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;border-radius:50%;background:${up.color};box-shadow:0 0 12px ${up.color};opacity:${lvl>0 && enabled ? 1 : 0.35};`;
+        card.appendChild(icon);
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = `${up.name} (Lv.${lvl}/${up.maxLevel})`;
+        card.appendChild(nameEl);
+
+        const descEl = document.createElement('div');
+        descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+        descEl.textContent = `${up.desc} Current: +${bonusPct}% ${up.statLabel} (max +${maxPct}%).`;
+        card.appendChild(descEl);
+
+        if(!maxed){
+          const cost = upgradeNextCost(up, lvl);
+          const req = document.createElement('div');
+          req.className = 'skinReq';
+          req.textContent = `${up.costType==='coins' ? '🪙' : '💵'} ${cost} — TAP TO LEVEL UP`;
+          card.appendChild(req);
+        } else {
+          const tag = document.createElement('div');
+          tag.className = 'skinEquippedTag';
+          tag.textContent = 'MAXED';
+          card.appendChild(tag);
+        }
+
+        if(lvl>0){
+          const toggleBtn = document.createElement('button');
+          toggleBtn.textContent = enabled ? 'ON — tap to disable' : 'OFF — tap to enable';
+          toggleBtn.style.cssText = `margin-top:6px;width:100%;padding:4px;font-size:9px;border-radius:4px;border:1px solid ${up.color};background:${enabled ? up.color : 'transparent'};color:${enabled ? '#001' : up.color};cursor:pointer;`;
+          toggleBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            setUpgradeEnabled(up.id, !enabled);
+            SFX.powerupPickup();
+            renderGrid();
+          };
+          card.appendChild(toggleBtn);
+        }
+
+        card.onclick = () => {
+          if(maxed) return;
+          const cost = upgradeNextCost(up, lvl);
+          const ok = up.costType==='coins' ? spendCoins(cost) : spendCash(cost);
+          if(ok){
+            setUpgradeLevel(up.id, lvl+1);
+            setUpgradeEnabled(up.id, true);
+            SFX.powerupPickup();
+            renderCurrency();
+            renderGrid();
+          } else {
+            SFX.shieldBlock();
+          }
+        };
+
+        gridEl.appendChild(card);
+      });
+      return;
+    }
+
     if(cat.abilities){
       ABILITY_DEFS.forEach(ab => {
         const owned = hasAbility(ab.id);
