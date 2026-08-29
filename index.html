@@ -46,6 +46,13 @@
   }
   #center h1 { font-size:32px; color:var(--accent1); text-shadow:0 0 12px var(--accent1); letter-spacing:2px; }
   #center p { font-size:13px; color:#8cf; max-width:420px; line-height:1.6; }
+  #pauseOverlay {
+    position:absolute; top:0; left:0; width:100%; height:100%; z-index:60;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(0,0,0,0.85); text-align:center; gap:14px;
+  }
+  #pauseOverlay h1 { font-size:32px; color:var(--accent1); text-shadow:0 0 12px var(--accent1); letter-spacing:4px; }
+  #pauseOverlay .pauseHint { font-size:11px; color:#789; }
   button {
     font-family:inherit; background:#0af; color:#001; border:none;
     padding:10px 26px; font-size:15px; font-weight:bold; cursor:pointer;
@@ -746,6 +753,14 @@
       <ul id="flagList"></ul>
     </div>
   </div>
+
+  <div id="pauseOverlay" class="hidden">
+    <h1>PAUSED</h1>
+    <button id="resumeBtn">RESUME</button>
+    <button id="restartPauseBtn">RESTART RUN</button>
+    <button id="quitPauseBtn">QUIT TO MENU</button>
+    <p class="pauseHint">ESC / P — or Start/Menu button on controller</p>
+  </div>
 </div>
  
 <script>
@@ -1291,6 +1306,7 @@ function refreshMobileNukeButton(){
 }
 
 let running = false;
+let paused = false;
 let score = 0, wave = 1;
 let corruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
 let frame = 0;
@@ -1430,10 +1446,21 @@ const SHIP_SKINS = [
   { id:'default', name:'F-8 Standard', unlock:{type:'default'}, draw(ctx,th){
     ctx.fillStyle='#7fd8ff'; ctx.strokeStyle='#0ff'; ctx.lineWidth=1.5;
     ctx.beginPath();
-    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
-    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.moveTo(0,-22);
+    ctx.lineTo(3,-8);
+    ctx.lineTo(16,6); ctx.lineTo(16,10); ctx.lineTo(5,7);
+    ctx.lineTo(5,14);
+    ctx.lineTo(9,19); ctx.lineTo(5,19); ctx.lineTo(2,14);
+    ctx.lineTo(-2,14); ctx.lineTo(-5,19); ctx.lineTo(-9,19);
+    ctx.lineTo(-5,14);
+    ctx.lineTo(-5,7); ctx.lineTo(-16,10); ctx.lineTo(-16,6);
+    ctx.lineTo(-3,-8);
     ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#0ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    // canopy
+    ctx.fillStyle='#0af';
+    ctx.beginPath(); ctx.ellipse(0,-6,2,6,0,0,Math.PI*2); ctx.fill();
+    // wing accents
+    ctx.fillStyle='#0ff'; ctx.fillRect(-15,6,8,3); ctx.fillRect(7,6,8,3);
     drawThruster(ctx,th);
   }},
   { id:'crimson', name:'Crimson Hawk', unlock:{type:'score', value:1000}, draw(ctx,th){
@@ -1499,6 +1526,62 @@ const SHIP_SKINS = [
     ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle='#ff2222'; ctx.fillRect(-1,-20,2,14);
     drawThruster(ctx,th,'rgba(255,20,20,0.9)');
+  }},
+  { id:'a10', name:'A-10 Warthog', unlock:{type:'coins', value:550}, draw(ctx,th){
+    // broad straight wings + twin tail fins, olive drab camo
+    ctx.fillStyle='#5b6b4f'; ctx.strokeStyle='#2f3a28'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20);
+    ctx.lineTo(4,-4);
+    ctx.lineTo(19,5); ctx.lineTo(19,9); ctx.lineTo(5,7);
+    ctx.lineTo(5,13);
+    ctx.lineTo(10,19); ctx.lineTo(6,19); ctx.lineTo(2,13);
+    ctx.lineTo(-2,13); ctx.lineTo(-6,19); ctx.lineTo(-10,19);
+    ctx.lineTo(-5,13);
+    ctx.lineTo(-5,7); ctx.lineTo(-19,9); ctx.lineTo(-19,5);
+    ctx.lineTo(-4,-4);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // cockpit canopy
+    ctx.fillStyle='#1a2a1f';
+    ctx.beginPath(); ctx.ellipse(0,-8,2.5,5,0,0,Math.PI*2); ctx.fill();
+    // nose cannon tip
+    ctx.fillStyle='#888'; ctx.fillRect(-1,-22,2,4);
+    drawThruster(ctx,th,'rgba(150,160,120,0.8)');
+  }},
+  { id:'afterburner', name:'Afterburner', unlock:{type:'coins', value:500}, draw(ctx,th){
+    // green energy ring glowing behind the jet
+    const grad = ctx.createRadialGradient(0,2,2,0,2,22);
+    grad.addColorStop(0, 'rgba(80,255,120,0.55)');
+    grad.addColorStop(0.6, 'rgba(20,180,90,0.28)');
+    grad.addColorStop(1, 'rgba(20,180,90,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0,2,22,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(120,255,150,0.6)'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(0,2,20,0,Math.PI*2); ctx.stroke();
+
+    ctx.fillStyle='#d8dde2'; ctx.strokeStyle='#8fffa8'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-20); ctx.lineTo(10,10); ctx.lineTo(4,8); ctx.lineTo(4,18);
+    ctx.lineTo(-4,18); ctx.lineTo(-4,8); ctx.lineTo(-10,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#39ff6a'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
+    drawThruster(ctx,th,'rgba(60,255,120,0.9)');
+  }},
+  { id:'b2', name:'B-2 Spirit', unlock:{type:'wave', value:20}, draw(ctx,th){
+    // flying wing silhouette, serrated trailing edge, stealth grey
+    ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#444'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(0,-14);
+    ctx.lineTo(22,10); ctx.lineTo(14,8); ctx.lineTo(14,14);
+    ctx.lineTo(8,10); ctx.lineTo(4,14);
+    ctx.lineTo(0,10);
+    ctx.lineTo(-4,14); ctx.lineTo(-8,10);
+    ctx.lineTo(-14,14); ctx.lineTo(-14,8); ctx.lineTo(-22,10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // cockpit blister
+    ctx.fillStyle='#333';
+    ctx.beginPath(); ctx.ellipse(0,-4,2,4,0,0,Math.PI*2); ctx.fill();
+    drawThruster(ctx,th,'rgba(80,80,90,0.7)');
   }},
   { id:'ace100', name:'Centurion', unlock:{type:'kills', value:100}, draw(ctx,th){
     ctx.fillStyle='#2b6e4f'; ctx.strokeStyle='#7be0a8'; ctx.lineWidth=1.5;
@@ -4346,6 +4429,7 @@ function gameOver(){
  
 function loop(){
   if(!running) return;
+  if(paused){ requestAnimationFrame(loop); return; }
   frame++;
   if(frame % 600 === 0) syncCurrencyToServer(); // stay "live" during long runs too
  
@@ -4479,6 +4563,63 @@ function wireStartScreen(){
   updateControlsInfoText();
   wireAuthBar();
 }
+
+// ---------- Pause menu ----------
+function openPause(){
+  if(!running || paused || dyingTimer>0) return;
+  paused = true;
+  document.getElementById('pauseOverlay').classList.remove('hidden');
+  setMobileControlsVisible(false);
+  SFX.uiClick();
+}
+function closePause(){
+  if(!paused) return;
+  paused = false;
+  document.getElementById('pauseOverlay').classList.add('hidden');
+  setMobileControlsVisible(true);
+  SFX.uiClick();
+  requestAnimationFrame(loop);
+}
+function togglePause(){
+  if(paused) closePause(); else openPause();
+}
+function quitPauseToMenu(){
+  paused = false;
+  running = false;
+  syncCurrencyToServer();
+  document.getElementById('pauseOverlay').classList.add('hidden');
+  setMobileControlsVisible(false);
+  const center = document.getElementById('center');
+  center.innerHTML = START_SCREEN_HTML;
+  center.classList.remove('hidden');
+  wireStartScreen();
+  SFX.uiClick();
+}
+document.getElementById('resumeBtn').onclick = () => closePause();
+document.getElementById('restartPauseBtn').onclick = () => { closePause(); resetGame(); };
+document.getElementById('quitPauseBtn').onclick = () => quitPauseToMenu();
+
+// ESC or P toggles pause (keyboard). Ignored while dying/not running.
+window.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' || e.key.toLowerCase() === 'p'){
+    if(running && dyingTimer<=0){ e.preventDefault(); togglePause(); }
+  }
+});
+
+// Start (PS3) / Menu (Xbox) button — standard Gamepad API button index 9 —
+// toggles pause. Runs on its own persistent poll so it works even while the
+// main loop is frozen (paused) and doesn't depend on updatePlayer() running.
+let pausePrevStart = false;
+function pauseGamepadWatcher(){
+  requestAnimationFrame(pauseGamepadWatcher);
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = gamepadIndex !== null ? pads[gamepadIndex] : null;
+  if(!gp){ pausePrevStart = false; return; }
+  const startBtn = gp.buttons[9] && gp.buttons[9].pressed;
+  if(startBtn && !pausePrevStart && running && dyingTimer<=0) togglePause();
+  pausePrevStart = startBtn;
+}
+pauseGamepadWatcher();
 
 // Preview-only "SHOT DOWN" screen — same markup/behavior as gameOver()'s
 // screen (including a real, working SUBMIT SCORE that hits Firebase for
