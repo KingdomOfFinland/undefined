@@ -1,15 +1,75 @@
-/* undefined — safe resolution detection + HUD scaling manager */
+/* undefined — resolution + HUD scaling manager */
 (() => {
   'use strict';
   const PRESETS=[['20:9',1600,720],['20:9',2340,1080],['20:9',2400,1080],['16:9',1280,720],['16:9',1600,900],['16:9',1920,1080],['16:9',2560,1440],['16:9',3840,2160],['16:10',1280,800],['16:10',1440,900],['16:10',1920,1200],['16:10',2560,1600],['4:3',800,600],['4:3',1024,768],['4:3',1280,960],['4:3',1600,1200],['3:2',1440,960],['3:2',2160,1440],['21:9',2560,1080],['21:9',3440,1440],['32:9',3840,1080],['32:9',5120,1440]];
-  const KEY='uf_resolution_settings_v2';
+  const KEY='uf_resolution_settings_v3';
   let settings={mode:'auto',width:1920,height:1080};
-  function ratio(w,h){const r=w/h,known=[[20/9,'20:9'],[16/9,'16:9'],[16/10,'16:10'],[4/3,'4:3'],[3/2,'3:2'],[21/9,'21:9'],[32/9,'32:9']];let b=known[0];for(const x of known)if(Math.abs(r-x[0])<Math.abs(r-b[0]))b=x;return Math.abs(r-b[0])<.03?b[1]:r.toFixed(3)+':1'}
+  let baseWidth=0,baseHeight=0,applying=false;
+
+  function ratio(w,h){
+    const r=w/h,known=[[20/9,'20:9'],[16/9,'16:9'],[16/10,'16:10'],[4/3,'4:3'],[3/2,'3:2'],[21/9,'21:9'],[32/9,'32:9']];
+    let b=known[0];for(const x of known)if(Math.abs(r-x[0])<Math.abs(r-b[0]))b=x;
+    return Math.abs(r-b[0])<.03?b[1]:r.toFixed(3)+':1';
+  }
   function detected(){return{width:Math.max(1,window.innerWidth),height:Math.max(1,window.innerHeight),dpr:window.devicePixelRatio||1,aspect:ratio(window.innerWidth,window.innerHeight)}}
+  function getCanvas(){return document.querySelector('canvas:not(.skinCard canvas)')||document.querySelector('canvas')}
+  function getSize(){const d=detected();if(settings.mode==='custom')return{width:settings.width,height:settings.height};return{width:d.width,height:d.height}}
+  function notify(){
+    const d=detected(),s=getSize();
+    const scale=Math.max(.75,Math.min(2.5,s.height/900));
+    window.dispatchEvent(new CustomEvent('uf-resolutionchange',{detail:{...d,width:s.width,height:s.height,scale,custom:settings.mode==='custom'}}));
+  }
+  function applyCanvas(){
+    const c=getCanvas();if(!c||applying)return;
+    if(!baseWidth){baseWidth=c.width||1920;baseHeight=c.height||1080}
+    const s=getSize();
+    if(!s.width||!s.height)return;
+    applying=true;
+    try{
+      // Change the real backing resolution. CSS keeps it fitted inside the viewport.
+      if(c.width!==s.width)c.width=s.width;
+      if(c.height!==s.height)c.height=s.height;
+      c.style.width='min(100vw, calc(100vh * '+(s.width/s.height)+'))';
+      c.style.height='auto';
+      c.dataset.renderWidth=s.width;c.dataset.renderHeight=s.height;c.dataset.displayAspect=ratio(s.width,s.height);
+      document.documentElement.style.setProperty('--hud-scale',Math.max(.75,Math.min(2.5,s.height/900)).toFixed(3));
+    }finally{applying=false}
+  }
+  function apply(){applyCanvas();notify()}
   function load(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&['auto','custom'].includes(x.mode))settings={...settings,...x}}catch(e){}}
   function save(){try{localStorage.setItem(KEY,JSON.stringify(settings))}catch(e){}}
-  function notify(){const d=detected();const w=settings.mode==='custom'?settings.width:d.width,h=settings.mode==='custom'?settings.height:d.height;const scale=Math.max(.75,Math.min(2.5,h/900));window.dispatchEvent(new CustomEvent('uf-resolutionchange',{detail:{...d,width:w,height:h,scale,custom:settings.mode==='custom'}}))}
-  function addUI(){if(document.getElementById('resolutionPanel'))return;const style=document.createElement('style');style.textContent=`#resolutionPanel{position:fixed;inset:0;z-index:100;background:rgba(0,5,10,.97);display:none;align-items:center;justify-content:center;font-family:'Courier New',monospace;color:#c9f7ff;padding:16px}#resolutionPanel.show{display:flex}.rpBox{width:min(620px,96vw);max-height:92vh;overflow:auto;background:#08151c;border:1px solid #0af;box-shadow:0 0 25px rgba(0,180,255,.2);padding:16px}.rpBox h2{text-align:center;color:#0ff;margin:0 0 4px;text-shadow:0 0 9px #0ff}.rpInfo{text-align:center;color:#789;font-size:10px;margin-bottom:12px}.rpGroup{border-top:1px solid #123;padding:10px 0}.rpGroup h3{font-size:11px;color:#8cf;margin:0 0 7px}.rpGrid{display:flex;flex-wrap:wrap;gap:6px}.rpBtn{background:#0a2a35;color:#8cf;border:1px solid #145;padding:6px 8px;font:10px 'Courier New',monospace;cursor:pointer}.rpBtn:hover{background:#12404d}.rpBtn.active{background:#0af;color:#001}.rpCustom{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.rpCustom input{width:95px;background:#001820;color:#0ff;border:1px solid #145;padding:6px;font:11px monospace}.rpBottom{text-align:center;padding-top:10px}.rpClose{background:#123;color:#8cf;border:1px solid #145;padding:7px 22px;font:11px monospace;cursor:pointer}`;document.head.appendChild(style);const p=document.createElement('div');p.id='resolutionPanel';p.innerHTML='<div class="rpBox"><h2>DISPLAY / RESOLUTION</h2><div class="rpInfo" id="rpInfo"></div><div class="rpGroup"><h3>MODE</h3><div class="rpGrid"><button class="rpBtn" id="rpAuto">AUTO</button></div></div><div class="rpGroup"><h3>PRESETS</h3><div id="rpPresets"></div></div><div class="rpGroup"><h3>CUSTOM RESOLUTION</h3><div class="rpCustom"><input id="rpW" type="number" min="160" max="16384" placeholder="width"><span>×</span><input id="rpH" type="number" min="120" max="16384" placeholder="height"><button class="rpBtn" id="rpCustomApply">APPLY</button></div></div><div class="rpBottom"><button class="rpClose">CLOSE [R / ESC]</button></div></div>';document.body.appendChild(p);const info=p.querySelector('#rpInfo'),pres=p.querySelector('#rpPresets');function refresh(){const d=detected();info.textContent=`detected: ${d.width} × ${d.height} · aspect: ${d.aspect} · dpr: ${d.dpr}`;p.querySelector('#rpAuto').classList.toggle('active',settings.mode==='auto');pres.innerHTML='';const by={};PRESETS.forEach(x=>(by[x[0]]??=[]).push(x));for(const [r,list] of Object.entries(by)){const g=document.createElement('div'),l=document.createElement('div'),row=document.createElement('div');g.style.marginBottom='7px';l.textContent=r;l.style.cssText='font-size:9px;color:#567;margin-bottom:4px';row.className='rpGrid';g.append(l,row);list.forEach(x=>{const b=document.createElement('button');b.className='rpBtn';b.textContent=`${x[1]} × ${x[2]}`;b.onclick=()=>{settings={mode:'custom',width:x[1],height:x[2]};save();notify();refresh()};row.appendChild(b)});pres.appendChild(g)}}p.querySelector('#rpAuto').onclick=()=>{settings.mode='auto';save();notify();refresh()};p.querySelector('#rpCustomApply').onclick=()=>{const w=parseInt(p.querySelector('#rpW').value,10),h=parseInt(p.querySelector('#rpH').value,10);if(w>=160&&h>=120){settings={mode:'custom',width:w,height:h};save();notify();refresh()}};p.querySelector('.rpClose').onclick=()=>p.classList.remove('show');window.addEventListener('keydown',e=>{if(e.key==='Escape')p.classList.remove('show');if(e.key.toLowerCase()==='r'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='TEXTAREA'){p.classList.toggle('show');refresh()}});window.addEventListener('resize',()=>{notify();if(p.classList.contains('show'))refresh()});window.addEventListener('orientationchange',notify);window.__openResolutionPanel=()=>{refresh();p.classList.add('show')}}
+
+  function addUI(){
+    if(document.getElementById('resolutionPanel'))return;
+    const style=document.createElement('style');style.textContent=`
+      #resolutionPanel{position:fixed;inset:0;z-index:100;background:rgba(0,5,10,.97);display:none;align-items:center;justify-content:center;font-family:'Courier New',monospace;color:#c9f7ff;padding:16px}
+      #resolutionPanel.show{display:flex}.rpBox{width:min(620px,96vw);max-height:92vh;overflow:auto;background:#08151c;border:1px solid #0af;box-shadow:0 0 25px rgba(0,180,255,.2);padding:16px}
+      .rpBox h2{text-align:center;color:#0ff;margin:0 0 4px;text-shadow:0 0 9px #0ff}.rpInfo{text-align:center;color:#789;font-size:10px;margin-bottom:12px}
+      .rpGroup{border-top:1px solid #123;padding:10px 0}.rpGroup h3{font-size:11px;color:#8cf;margin:0 0 7px}.rpGrid{display:flex;flex-wrap:wrap;gap:6px}
+      .rpBtn{background:#0a2a35;color:#8cf;border:1px solid #145;padding:6px 8px;font:10px 'Courier New',monospace;cursor:pointer}.rpBtn:hover{background:#12404d}.rpBtn.active{background:#0af;color:#001}
+      .rpCustom{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.rpCustom input{width:95px;background:#001820;color:#0ff;border:1px solid #145;padding:6px;font:11px monospace}
+      .rpBottom{text-align:center;padding-top:10px}.rpClose{background:#123;color:#8cf;border:1px solid #145;padding:7px 22px;font:11px monospace;cursor:pointer}
+      :root{--hud-scale:1}.hud-scale-target{transform-origin:top left}
+      #hud{font-size:calc(14px * var(--hud-scale));padding:calc(10px * var(--hud-scale)) calc(16px * var(--hud-scale))}
+      #hud .bar-bg{width:calc(160px * var(--hud-scale));height:calc(10px * var(--hud-scale))}
+    `;document.head.appendChild(style);
+    const p=document.createElement('div');p.id='resolutionPanel';p.innerHTML='<div class="rpBox"><h2>DISPLAY / RESOLUTION</h2><div class="rpInfo" id="rpInfo"></div><div class="rpGroup"><h3>MODE</h3><div class="rpGrid"><button class="rpBtn" id="rpAuto">AUTO</button></div></div><div class="rpGroup"><h3>PRESETS</h3><div id="rpPresets"></div></div><div class="rpGroup"><h3>CUSTOM RESOLUTION</h3><div class="rpCustom"><input id="rpW" type="number" min="160" max="16384" placeholder="width"><span>×</span><input id="rpH" type="number" min="120" max="16384" placeholder="height"><button class="rpBtn" id="rpCustomApply">APPLY</button></div></div><div class="rpBottom"><button class="rpClose">CLOSE [R / ESC]</button></div></div>';document.body.appendChild(p);
+    const info=p.querySelector('#rpInfo'),pres=p.querySelector('#rpPresets');
+    function refresh(){
+      const d=detected(),s=getSize();info.textContent=`detected: ${d.width} × ${d.height} · active: ${s.width} × ${s.height} · aspect: ${ratio(s.width,s.height)} · dpr: ${d.dpr}`;
+      p.querySelector('#rpAuto').classList.toggle('active',settings.mode==='auto');pres.innerHTML='';const by={};PRESETS.forEach(x=>(by[x[0]]??=[]).push(x));
+      for(const [r,list] of Object.entries(by)){const g=document.createElement('div'),l=document.createElement('div'),row=document.createElement('div');g.style.marginBottom='7px';l.textContent=r;l.style.cssText='font-size:9px;color:#567;margin-bottom:4px';row.className='rpGrid';g.append(l,row);
+        list.forEach(x=>{const b=document.createElement('button');b.className='rpBtn';b.textContent=`${x[1]} × ${x[2]}`;b.onclick=()=>{settings={mode:'custom',width:x[1],height:x[2]};save();apply();refresh()};row.appendChild(b)});pres.appendChild(g)}
+    }
+    p.querySelector('#rpAuto').onclick=()=>{settings.mode='auto';save();apply();refresh()};
+    p.querySelector('#rpCustomApply').onclick=()=>{const w=parseInt(p.querySelector('#rpW').value,10),h=parseInt(p.querySelector('#rpH').value,10);if(w>=160&&h>=120){settings={mode:'custom',width:w,height:h};save();apply();refresh()}};
+    p.querySelector('.rpClose').onclick=()=>p.classList.remove('show');
+    window.addEventListener('keydown',e=>{if(e.key==='Escape')p.classList.remove('show');if(e.key.toLowerCase()==='r'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='TEXTAREA'){p.classList.toggle('show');refresh()}});
+    window.addEventListener('resize',()=>{if(settings.mode==='auto')apply();else notify();if(p.classList.contains('show'))refresh()});window.addEventListener('orientationchange',()=>{if(settings.mode==='auto')apply()});
+    window.__openResolutionPanel=()=>{refresh();p.classList.add('show')};
+  }
   window.addEventListener('uf-resolutionchange',e=>{const d=e.detail;document.documentElement.style.setProperty('--hud-scale',d.scale.toFixed(3));window.dispatchEvent(new CustomEvent('uf-starfieldresize',{detail:d}))});
-  load();const boot=()=>{addUI();notify()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+  load();
+  const boot=()=>{addUI();setTimeout(apply,0)};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
