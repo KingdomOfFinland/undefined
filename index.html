@@ -1051,7 +1051,7 @@ window.addEventListener('gamepaddisconnected', (e) => {
   if(gamepadIndex === e.gamepad.index) gamepadIndex = null;
   console.log('[GAMEPAD DISCONNECTED]', e.gamepad.id);
 });
- 
+
 // ---------- Rumble ----------
 // Buzzes whichever gamepad is currently active. Safe no-op if nothing's
 // connected or the browser/pad doesn't support haptics.
@@ -6483,7 +6483,9 @@ if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
   applyDisplaySettings();
 }
- 
+
+src="texture-gallery.js"
+
 </script>
 </body>
 </html>
