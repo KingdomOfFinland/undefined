@@ -191,6 +191,7 @@
     position:absolute; top:0; left:0; width:100%; height:100%;
     pointer-events:none; display:none; z-index:20; touch-action:none;
     -webkit-user-select:none; user-select:none;
+    --btn-scale: 1;
   }
   #mobileControls.show { display:block; }
 
@@ -198,6 +199,7 @@
     position:absolute; left:4%; bottom:6%; width:34vmin; height:34vmin;
     max-width:170px; max-height:170px; min-width:110px; min-height:110px;
     pointer-events:auto; touch-action:none;
+    transform:scale(var(--btn-scale)); transform-origin:bottom left;
   }
   #joystickBase {
     position:absolute; top:0; left:0; width:100%; height:100%; border-radius:50%;
@@ -216,6 +218,7 @@
     background:rgba(0,30,40,0.4); border:2px solid rgba(0,220,255,0.4);
     color:#aef2ff; font-family:inherit; font-weight:bold; text-shadow:0 0 6px rgba(0,200,255,0.6);
     line-height:1.1;
+    transform:scale(var(--btn-scale)); transform-origin:bottom right;
   }
   .mcBtn:active, .mcBtn.pressed { background:rgba(0,220,255,0.55); border-color:#9ff; }
   .mcBtn .mcSub { font-size:0.55em; opacity:0.8; font-weight:normal; }
@@ -736,6 +739,8 @@
     <button id="skinsBtnStart">SKINS</button>
     <button id="dailyBtn">🎁 DAILY</button>
     <button id="touchToggleBtn">📱 Touch Controls: AUTO</button>
+    <button id="btnSizeBtn">🔘 Button Size: NORMAL</button>
+    <button id="difficultyBtn">⚔ Difficulty: NORMAL</button>
     <div id="authBar">
       <button id="googleSignInBtn">🔐 Sign in with Google</button>
       <span id="authStatus" class="signedout"></span>
@@ -809,7 +814,7 @@ const SFX = (() => {
     return actx;
   }
   // Browsers block audio until a user gesture — this quietly wakes the context on the first one.
-  function unlock(){ ac(); }
+  function unlock(){ ac(); MUSIC.start('menu'); }
   window.addEventListener('keydown', unlock, { once:true });
   window.addEventListener('pointerdown', unlock, { once:true });
  
@@ -853,6 +858,7 @@ const SFX = (() => {
   return {
     setMuted(v){ muted = v; },
     isMuted(){ return muted; },
+    getContext(){ return ac(); },
     shoot(){ tone('square', 880, 0.07, {vol:0.07, freqEnd:420}); },
     enemyShoot(){ tone('square', 300, 0.08, {vol:0.045, freqEnd:150}); },
     bombDrop(){ tone('sine', 160, 0.14, {vol:0.05, freqEnd:70}); },
@@ -913,6 +919,116 @@ const SFX = (() => {
       tone('sine', 440, 0.18, {vol:0.09, freqEnd:880});
       setTimeout(()=>tone('sine', 660, 0.22, {vol:0.09, freqEnd:1320}), 120);
       noiseBurst(0.2, {vol:0.05, filterFreq:3000, filterEnd:1500});
+    }
+  };
+})();
+
+// ---------- Procedural music engine ----------
+// No licensed/external audio in this build — everything here is synthesized
+// live with the same oscillator+gain approach as SFX, sharing its
+// AudioContext. Menu theme is sparse/mellow; the gameplay theme is a driving
+// 16-step bass+lead sequencer whose tempo/density scale with difficulty.
+const MUSIC = (() => {
+  let playing = false;
+  let scene = null; // 'menu' | 'game'
+  let intensity = 1; // ~0.85 (easy) .. 1.3 (hardcore) — scales tempo & lead density
+  let master = null;
+  let duckGain = 1; // temporary volume multiplier (e.g. while paused)
+  let stepIdx = 0, bar = 0;
+  let nextStepTime = 0;
+  let timerId = null;
+
+  function ctx(){ return SFX.getContext(); }
+  function ensureMaster(){
+    const a = ctx(); if(!a) return null;
+    if(!master){
+      master = a.createGain();
+      master.gain.value = 0.16;
+      master.connect(a.destination);
+    }
+    return master;
+  }
+
+  // C natural-minor-ish palette — low octave for the bassline, higher for the lead/arp.
+  const SCALE_BASS = [65.41, 77.78, 87.31, 98.00, 103.83, 116.54]; // C2 Eb2 F2 G2 Ab2 Bb2
+  const SCALE_LEAD = [261.63, 311.13, 349.23, 392.00, 415.30, 466.16, 523.25]; // C4..C5
+
+  const BASS_PATTERN = [0,-1,0,-1, 2,-1,0,-1, 5,-1,5,-1, 4,-1,3,-1];
+  const LEAD_PATTERNS = [
+    [0,-1,2,-1, 4,-1,2,-1, 0,-1,2,-1, 4,6,4,2],
+    [4,-1,6,-1, 4,-1,2,-1, 0,-1,-1,-1, 2,-1,0,-1]
+  ];
+
+  function playNote(type, freq, time, dur, vol){
+    const a = ctx(); if(!a) return;
+    const m = ensureMaster(); if(!m) return;
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, time);
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.linearRampToValueAtTime(vol*duckGain, time+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, time+dur);
+    o.connect(g); g.connect(m);
+    o.start(time); o.stop(time+dur+0.05);
+  }
+
+  function bpmFor(){ return Math.round((scene==='menu' ? 96 : 128) * intensity); }
+
+  function scheduler(){
+    const a = ctx();
+    if(!a || !playing){ timerId = null; return; }
+    const stepDur = (60/bpmFor()) / 4; // 16th notes
+    while(nextStepTime < a.currentTime + 0.15){
+      const i = stepIdx % 16;
+      const bassIdx = BASS_PATTERN[i];
+      if(bassIdx >= 0) playNote('triangle', SCALE_BASS[bassIdx], nextStepTime, stepDur*0.9, 0.5);
+      if(scene === 'game'){
+        const patt = LEAD_PATTERNS[bar % LEAD_PATTERNS.length];
+        const leadIdx = patt[i];
+        // sparser lead on lower intensity (easy difficulty) — denser/faster on hardcore
+        if(leadIdx >= 0 && (intensity > 0.95 || i % 2 === 0)){
+          playNote('square', SCALE_LEAD[leadIdx], nextStepTime, stepDur*0.7, 0.11);
+        }
+      } else if(i % 4 === 0){
+        const leadIdx = LEAD_PATTERNS[0][i];
+        if(leadIdx >= 0) playNote('sine', SCALE_LEAD[leadIdx], nextStepTime, stepDur*1.6, 0.08);
+      }
+      nextStepTime += stepDur;
+      stepIdx++;
+      if(stepIdx % 16 === 0) bar++;
+    }
+    timerId = setTimeout(scheduler, 50);
+  }
+
+  return {
+    start(newScene){
+      scene = newScene;
+      if(SFX.isMuted()) return; // stays silent but remembers the scene for refreshMute()
+      const a = ctx(); if(!a) return;
+      if(!playing){
+        playing = true;
+        stepIdx = 0; bar = 0;
+        nextStepTime = a.currentTime + 0.05;
+        scheduler();
+      }
+    },
+    stop(){
+      playing = false;
+      if(timerId){ clearTimeout(timerId); timerId = null; }
+    },
+    setScene(newScene){
+      if(scene === newScene) return;
+      const wasPlaying = playing;
+      scene = newScene;
+      stepIdx = 0; bar = 0; // clean restart of the pattern on scene change
+      if(wasPlaying){ this.stop(); this.start(newScene); }
+    },
+    setIntensity(v){ intensity = v; },
+    setDuck(v){ duckGain = v; }, // e.g. 0.4 while paused
+    refreshMute(){
+      if(SFX.isMuted()) this.stop();
+      else if(scene) this.start(scene);
     }
   };
 })();
@@ -1038,6 +1154,50 @@ function isMobileLayout(){
   return touchCapable;
 }
 
+// Adjustable mobile control (joystick + fire buttons) size — cycles through
+// preset scales, applied via the --btn-scale CSS var on #mobileControls.
+const BTN_SCALE_STEPS = [
+  { label:'SMALL',  scale:0.8 },
+  { label:'NORMAL', scale:1.0 },
+  { label:'LARGE',  scale:1.2 },
+  { label:'XL',     scale:1.4 }
+];
+function getBtnScaleIndex(){
+  const i = parseInt(localStorage.getItem('uf_btn_scale_idx') || '1', 10);
+  return (i>=0 && i<BTN_SCALE_STEPS.length) ? i : 1;
+}
+function setBtnScaleIndex(i){ localStorage.setItem('uf_btn_scale_idx', String(i)); }
+function applyBtnScale(){
+  const mc = document.getElementById('mobileControls');
+  if(mc) mc.style.setProperty('--btn-scale', String(BTN_SCALE_STEPS[getBtnScaleIndex()].scale));
+}
+function updateBtnSizeBtnLabel(){
+  const btn = document.getElementById('btnSizeBtn');
+  if(!btn) return;
+  btn.textContent = `🔘 Button Size: ${BTN_SCALE_STEPS[getBtnScaleIndex()].label}`;
+}
+
+// Difficulty — locked in for the run at LAUNCH, not changeable mid-run.
+const DIFFICULTIES = [
+  { id:'easy',     label:'EASY',     hpMult:0.75, dmgMult:0.75, spawnRateMult:0.8,  currencyMult:0.75, musicIntensity:0.85 },
+  { id:'normal',   label:'NORMAL',   hpMult:1,    dmgMult:1,    spawnRateMult:1,    currencyMult:1,    musicIntensity:1.0  },
+  { id:'hard',     label:'HARD',     hpMult:1.35, dmgMult:1.35, spawnRateMult:1.25, currencyMult:1.5,  musicIntensity:1.15 },
+  { id:'hardcore', label:'HARDCORE', hpMult:1.75, dmgMult:1.75, spawnRateMult:1.5,  currencyMult:2.25, musicIntensity:1.3  }
+];
+function getDifficultyPref(){
+  return localStorage.getItem('uf_difficulty') || 'normal';
+}
+function setDifficultyPref(id){ localStorage.setItem('uf_difficulty', id); }
+function getDifficultyDef(id){ return DIFFICULTIES.find(d => d.id===id) || DIFFICULTIES[1]; }
+// The run's active difficulty — set once in resetGame(), read everywhere else
+// during play so it can't shift mid-run even if the preference changes.
+let currentDifficulty = DIFFICULTIES[1];
+function updateDifficultyBtnLabel(){
+  const btn = document.getElementById('difficultyBtn');
+  if(!btn) return;
+  btn.textContent = `⚔ Difficulty: ${getDifficultyDef(getDifficultyPref()).label}`;
+}
+
 function updateControlsInfoText(){
   const p = document.getElementById('controlsInfo');
   if(!p) return;
@@ -1067,6 +1227,8 @@ function updateTouchToggleBtnLabel(){
 document.addEventListener('DOMContentLoaded', () => {
   updateControlsInfoText();
   updateTouchToggleBtnLabel();
+  applyBtnScale();
+  updateBtnSizeBtnLabel();
   const toggleBtn = document.getElementById('touchToggleBtn');
   if(toggleBtn){
     toggleBtn.onclick = () => {
@@ -1077,6 +1239,25 @@ document.addEventListener('DOMContentLoaded', () => {
       updateTouchToggleBtnLabel();
       updateControlsInfoText();
       updateRotateHint();
+    };
+  }
+  const btnSizeBtn = document.getElementById('btnSizeBtn');
+  if(btnSizeBtn){
+    btnSizeBtn.onclick = () => {
+      SFX.uiClick();
+      setBtnScaleIndex((getBtnScaleIndex()+1) % BTN_SCALE_STEPS.length);
+      applyBtnScale();
+      updateBtnSizeBtnLabel();
+    };
+  }
+  updateDifficultyBtnLabel();
+  const difficultyBtn = document.getElementById('difficultyBtn');
+  if(difficultyBtn){
+    difficultyBtn.onclick = () => {
+      SFX.uiClick();
+      const idx = DIFFICULTIES.findIndex(d => d.id === getDifficultyPref());
+      setDifficultyPref(DIFFICULTIES[(idx+1) % DIFFICULTIES.length].id);
+      updateDifficultyBtnLabel();
     };
   }
 });
@@ -1307,6 +1488,15 @@ function refreshMobileNukeButton(){
 
 let running = false;
 let paused = false;
+// Fixed-timestep simulation: the whole engine (movement, cooldowns, spawn
+// timers) is written in per-tick terms assuming 60 ticks/sec. Decoupling
+// simulation ticks from the display's actual refresh rate (which varies a
+// lot on mobile — 30/90/120Hz, or throttled background tabs) keeps game
+// speed identical on every device instead of scaling with rAF frequency.
+const FIXED_DT = 1000/60;
+const MAX_TICKS_PER_FRAME = 5; // catch-up cap — avoids a spiral of death after a big stall
+let tickAccumulator = 0;
+let lastFrameTime = 0;
 let score = 0, wave = 1;
 let corruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
 let frame = 0;
@@ -2564,7 +2754,7 @@ const player = {
  
 function damagePlayer(amount){
   if(player.shieldT>0) return false;
-  player.hp -= amount;
+  player.hp -= amount * currentDifficulty.dmgMult;
   return true;
 }
  
@@ -2833,9 +3023,9 @@ function maybeDropPowerup(e){
  
 function awardKillCoins(e){
   if(e.isBoss){
-    addCoins(Math.round(rand(40, 60) * getKillMult()));  // 50 coins ± 10, scaled by kill mult
+    addCoins(Math.round(rand(40, 60) * getKillMult() * currentDifficulty.currencyMult));  // 50 coins ± 10, scaled
   } else {
-    addCoins(Math.round(((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1) * getKillMult()));
+    addCoins(Math.round(((e.type==='spaceship' || e.type==='carrier' || e.type==='sentinel') ? 10 : 1) * getKillMult() * currentDifficulty.currencyMult));
   }
 }
  
@@ -3063,6 +3253,15 @@ function spawnEnemy(type){
     Object.assign(base,{ hp:2006, maxHp:2006, w:70,h:70, speed:0.9, scoreVal:1800,
       shieldHp:727, shieldMax:727, shieldHitTimer:0, pinCd: rand(60,100),
       pinMissileCd: rand(180,260), isBoss:true });
+  }
+  // Difficulty HP/shield scaling — applied uniformly after the per-type stats above.
+  if(currentDifficulty.hpMult !== 1){
+    base.hp = Math.round(base.hp * currentDifficulty.hpMult);
+    base.maxHp = Math.round(base.maxHp * currentDifficulty.hpMult);
+    if(base.shieldHp !== undefined){
+      base.shieldHp = Math.round(base.shieldHp * currentDifficulty.hpMult);
+      base.shieldMax = Math.round(base.shieldMax * currentDifficulty.hpMult);
+    }
   }
   enemies.push(base);
 }
@@ -3409,7 +3608,7 @@ function updateEnemies(){
   spawnTimer--;
   if(spawnQueue.length && spawnTimer<=0){
     spawnEnemy(spawnQueue.shift());
-    spawnTimer = Math.max(14, 40 - Math.floor(wave/8));
+    spawnTimer = Math.max(6, Math.round((40 - Math.floor(wave/8)) / currentDifficulty.spawnRateMult));
   }
  
   for(const e of enemies){
@@ -4332,6 +4531,8 @@ async function loadLeaderboard(){
 function gameOver(){
   running = false;
   SFX.gameOver();
+  MUSIC.setIntensity(1);
+  MUSIC.setScene('menu');
   syncCurrencyToServer();
   setMobileControlsVisible(false);
   const center = document.getElementById('center');
@@ -4427,18 +4628,14 @@ function gameOver(){
   };
 }
  
-function loop(){
-  if(!running) return;
-  if(paused){ requestAnimationFrame(loop); return; }
+function tick(){
   frame++;
   if(frame % 600 === 0) syncCurrencyToServer(); // stay "live" during long runs too
  
   if(dyingTimer>0){
     dyingTimer--;
     updateParticles();
-    render();
-    if(dyingTimer<=0){ gameOver(); return; }
-    requestAnimationFrame(loop);
+    if(dyingTimer<=0) gameOver();
     return;
   }
  
@@ -4458,7 +4655,6 @@ function loop(){
   updateParticles();
   updateHud();
   checkWaveEnd();
-  render();
   if(player.hp<=0 && !godMode){
     if(player.secondChances > 0){
       player.secondChances--;
@@ -4468,7 +4664,6 @@ function loop(){
       spawnParticles(player.x,player.y,'#ff3d5c',24,5,4.5);
       spawnParticles(player.x,player.y,'#5ecbff',16,3.5);
       SFX.shieldBlock();
-      requestAnimationFrame(loop);
       return;
     }
     spawnParticles(player.x,player.y,'#5ecbff',24,5,4.5);
@@ -4476,9 +4671,29 @@ function loop(){
     spawnParticles(player.x,player.y,'#fff',8,2.5,5);
     SFX.playerDeath();
     dyingTimer = 36;
-    requestAnimationFrame(loop);
-    return;
   }
+}
+ 
+function loop(ts){
+  if(!running) return;
+  if(paused){ lastFrameTime = ts; requestAnimationFrame(loop); return; }
+  if(!lastFrameTime) lastFrameTime = ts;
+ 
+  let delta = ts - lastFrameTime;
+  lastFrameTime = ts;
+  if(delta > 250) delta = 250; // clamp big stalls (backgrounded tab, device sleep)
+  tickAccumulator += delta;
+ 
+  let ticks = 0;
+  while(tickAccumulator >= FIXED_DT && ticks < MAX_TICKS_PER_FRAME && running){
+    tick();
+    tickAccumulator -= FIXED_DT;
+    ticks++;
+  }
+  if(ticks >= MAX_TICKS_PER_FRAME) tickAccumulator = 0; // drop remainder rather than let it snowball
+ 
+  if(!running) return; // tick() may have triggered gameOver()
+  render();
   requestAnimationFrame(loop);
 }
  
@@ -4489,6 +4704,9 @@ async function resetGame(){
     return;
   }
   await ensureUsername();
+  currentDifficulty = getDifficultyDef(getDifficultyPref());
+  MUSIC.setIntensity(currentDifficulty.musicIntensity);
+  MUSIC.setScene('game');
   score=0; wave=1;
   dyingTimer = 0;
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0; cheatDetectedThisRun = false;
@@ -4518,6 +4736,7 @@ async function resetGame(){
   document.getElementById('center').classList.add('hidden');
   startWave(1);
   running = true;
+  tickAccumulator = 0; lastFrameTime = 0;
   refreshMobileAbilityButtons();
   refreshMobileNukeButton();
   setMobileControlsVisible(true);
@@ -4560,6 +4779,26 @@ function wireStartScreen(){
     };
   }
   updateTouchToggleBtnLabel();
+  const btnSizeBtn = document.getElementById('btnSizeBtn');
+  if(btnSizeBtn){
+    btnSizeBtn.onclick = () => {
+      SFX.uiClick();
+      setBtnScaleIndex((getBtnScaleIndex()+1) % BTN_SCALE_STEPS.length);
+      applyBtnScale();
+      updateBtnSizeBtnLabel();
+    };
+  }
+  updateBtnSizeBtnLabel();
+  updateDifficultyBtnLabel();
+  const difficultyBtn = document.getElementById('difficultyBtn');
+  if(difficultyBtn){
+    difficultyBtn.onclick = () => {
+      SFX.uiClick();
+      const idx = DIFFICULTIES.findIndex(d => d.id === getDifficultyPref());
+      setDifficultyPref(DIFFICULTIES[(idx+1) % DIFFICULTIES.length].id);
+      updateDifficultyBtnLabel();
+    };
+  }
   updateControlsInfoText();
   wireAuthBar();
 }
@@ -4570,6 +4809,7 @@ function openPause(){
   paused = true;
   document.getElementById('pauseOverlay').classList.remove('hidden');
   setMobileControlsVisible(false);
+  MUSIC.setDuck(0.35);
   SFX.uiClick();
 }
 function closePause(){
@@ -4577,6 +4817,7 @@ function closePause(){
   paused = false;
   document.getElementById('pauseOverlay').classList.add('hidden');
   setMobileControlsVisible(true);
+  MUSIC.setDuck(1);
   SFX.uiClick();
   requestAnimationFrame(loop);
 }
@@ -4586,6 +4827,9 @@ function togglePause(){
 function quitPauseToMenu(){
   paused = false;
   running = false;
+  MUSIC.setDuck(1);
+  MUSIC.setIntensity(1);
+  MUSIC.setScene('menu');
   syncCurrencyToServer();
   document.getElementById('pauseOverlay').classList.add('hidden');
   setMobileControlsVisible(false);
@@ -4769,6 +5013,7 @@ if(muteBtnEl){
   muteBtnEl.onclick = () => {
     const nowMuted = !SFX.isMuted();
     SFX.setMuted(nowMuted);
+    MUSIC.refreshMute();
     muteBtnEl.textContent = nowMuted ? '🔇' : '🔊';
     if(!nowMuted) SFX.uiClick();
   };
