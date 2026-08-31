@@ -2,9 +2,81 @@
 (() => {
   'use strict';
   const STYLE=`#textureGalleryOverlay{position:absolute;inset:0;z-index:75;background:rgba(0,5,10,.98);display:none;flex-direction:column;align-items:center;padding:14px;overflow:auto;font-family:'Courier New',monospace;color:#c9f7ff}#textureGalleryOverlay.show{display:flex}#textureGalleryOverlay h1{margin:4px 0 2px;color:#0ff;font-size:25px;text-shadow:0 0 12px #0ff;letter-spacing:2px}.tgSub{font-size:10px;color:#789;margin-bottom:10px;text-align:center}#tgTabs{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-bottom:10px;max-width:760px}.tgTab{background:#0a2a35;color:#8cf;border:1px solid #145;padding:6px 11px;font:11px 'Courier New',monospace;cursor:pointer}.tgTab.active{background:#0af;color:#001}#tgGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:9px;width:100%;max-width:760px}.tgCard{background:#0a1a22;border:1px solid #145;padding:8px;text-align:center;cursor:pointer;min-height:130px}.tgCard:hover{border-color:#0ff;box-shadow:0 0 10px rgba(0,255,255,.25)}.tgCard canvas{display:block;margin:0 auto 6px;width:90px;height:90px}.tgName{font-size:10px;color:#cdeaff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tgType{font-size:8px;color:#678;margin-top:3px}.tgLocked{font-size:8px;color:#f88;margin-top:2px}#tgClose{margin:12px 0 4px;background:#123;color:#8cf;border:1px solid #145;padding:7px 22px;font:12px 'Courier New',monospace;cursor:pointer}#tgDetail{position:fixed;inset:0;z-index:90;background:rgba(0,5,10,.96);display:none;align-items:center;justify-content:center;padding:18px}#tgDetail.show{display:flex}#tgDetailBox{width:min(430px,94vw);background:#08151c;border:1px solid #0af;box-shadow:0 0 24px rgba(0,180,255,.25);padding:15px;text-align:center}#tgDetailCanvas{width:260px;height:260px;max-width:80vw;max-height:55vh;display:block;margin:0 auto 10px;background:#05060a;border:1px solid #145}#tgDetailName{font-size:17px;color:#0ff;text-shadow:0 0 8px #0ff}#tgDetailInfo{font-size:10px;color:#789;margin:6px 0 10px;line-height:1.5}`;
-  function groups(){const a=[];if(Array.isArray(window.SHIP_SKINS))a.push({id:'ships',name:'ship skins',items:window.SHIP_SKINS,type:'ship'});if(window.ENEMY_SKINS)for(const [type,items] of Object.entries(window.ENEMY_SKINS))if(Array.isArray(items))a.push({id:'enemy_'+type,name:type+' skins',items,type:'enemy'});return a}
-  function draw(item,type,c,scale){const x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);x.save();x.translate(c.width/2,c.height/2);x.scale(scale,scale);try{if(typeof item.draw==='function')item.draw(x,type==='ship'?false:{w:70,h:46,diving:false,x:0,y:0})}catch(e){x.fillStyle='#f55';x.font='10px monospace';x.textAlign='center';x.fillText('render error',0,0);console.warn('[texture gallery]',item.id,e)}x.restore()}
-  function req(item){const u=item.unlock||{};return u.type==='default'?'default':u.value!=null?'unlock: '+u.type+' '+u.value:(u.type||'')}
-  function build(){if(document.getElementById('textureGalleryOverlay'))return;const s=document.createElement('style');s.textContent=STYLE;document.head.appendChild(s);const o=document.createElement('div');o.id='textureGalleryOverlay';o.innerHTML='<h1>TEXTURE GALLERY</h1><div class="tgSub">procedural textures from the current skin system</div><div id="tgTabs"></div><div id="tgGrid"></div><button id="tgClose">CLOSE [G / ESC]</button>';document.body.appendChild(o);const d=document.createElement('div');d.id='tgDetail';d.innerHTML='<div id="tgDetailBox"><canvas id="tgDetailCanvas" width="520" height="520"></canvas><div id="tgDetailName"></div><div id="tgDetailInfo"></div><button id="tgDetailClose">BACK</button></div>';document.body.appendChild(d);let active='all';const tabs=o.querySelector('#tgTabs'),grid=o.querySelector('#tgGrid');function render(){const gs=groups();tabs.innerHTML='';const add=(id,label)=>{const b=document.createElement('button');b.className='tgTab'+(active===id?' active':'');b.textContent=label;b.onclick=()=>{active=id;render()};tabs.appendChild(b)};add('all','ALL');gs.forEach(g=>add(g.id,g.name.toUpperCase()));grid.innerHTML='';const entries=[];gs.forEach(g=>{if(active==='all'||active===g.id)g.items.forEach(item=>entries.push({g,item}))});if(!entries.length){grid.innerHTML='<div style="grid-column:1/-1;color:#789;text-align:center;padding:30px">no procedural textures found.</div>';return}entries.forEach(({g,item})=>{const card=document.createElement('div');card.className='tgCard';const c=document.createElement('canvas');c.width=180;c.height=180;draw(item,g.type,c,3);const n=document.createElement('div');n.className='tgName';n.textContent=item.name||item.id||'unnamed';const t=document.createElement('div');t.className='tgType';t.textContent=g.name;const r=document.createElement('div');r.className='tgLocked';r.textContent=req(item);card.append(c,n,t,r);grid.appendChild(card);card.onclick=()=>{const dc=d.querySelector('#tgDetailCanvas');draw(item,g.type,dc,7);d.querySelector('#tgDetailName').textContent=item.name||item.id||'unnamed';d.querySelector('#tgDetailInfo').textContent=g.name+' · '+(item.id||'no id')+' · '+req(item);d.classList.add('show')}})}render()}function close(){d.classList.remove('show');o.classList.remove('show')}o.querySelector('#tgClose').onclick=close;d.querySelector('#tgDetailClose').onclick=()=>d.classList.remove('show');d.onclick=e=>{if(e.target===d)d.classList.remove('show')};window.addEventListener('keydown',e=>{if(e.key==='Escape'){if(d.classList.contains('show'))d.classList.remove('show');else if(o.classList.contains('show'))close()}if(e.key.toLowerCase()==='g'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='TEXTAREA'){if(o.classList.contains('show'))close();else{render();o.classList.add('show')}}});const b=document.createElement('button');b.textContent='TEXTURE GALLERY';b.style.cssText="position:fixed;bottom:10px;left:10px;z-index:30;background:#123;color:#8cf;border:1px solid #145;padding:6px 10px;font:10px 'Courier New',monospace;cursor:pointer;box-shadow:none";b.onclick=()=>{render();o.classList.add('show')};document.body.appendChild(b)}
+
+  // Top-level const/let declarations in the game's main script are global
+  // lexical bindings, not window properties. This script runs after index.html,
+  // so access them directly instead of looking for window.SHIP_SKINS.
+  function groups(){
+    const a=[];
+    try{
+      if(typeof SHIP_SKINS!=='undefined' && Array.isArray(SHIP_SKINS))
+        a.push({id:'ships',name:'ship skins',items:SHIP_SKINS,type:'ship'});
+    }catch(e){}
+    try{
+      if(typeof ENEMY_SKINS!=='undefined' && ENEMY_SKINS){
+        for(const [type,items] of Object.entries(ENEMY_SKINS)){
+          if(Array.isArray(items)) a.push({id:'enemy_'+type,name:type+' skins',items,type:'enemy'});
+        }
+      }
+    }catch(e){ console.warn('[texture gallery] could not read enemy skins',e); }
+    return a;
+  }
+
+  function draw(item,type,c,scale){
+    const x=c.getContext('2d'); x.clearRect(0,0,c.width,c.height); x.save();
+    x.translate(c.width/2,c.height/2); x.scale(scale,scale);
+    try{
+      if(typeof item.draw==='function') item.draw(x,type==='ship'?false:{w:70,h:46,diving:false,x:0,y:0,phase:0,shieldHp:0,shieldMax:1,laserT:0});
+    }catch(e){
+      x.fillStyle='#f55'; x.font='10px monospace'; x.textAlign='center';
+      x.fillText('render error',0,0); console.warn('[texture gallery]',item.id,e);
+    }
+    x.restore();
+  }
+
+  function req(item){const u=item.unlock||{};return u.type==='default'?'default':u.value!=null?'unlock: '+u.type+' '+u.value:(u.type||'');}
+
+  function build(){
+    if(document.getElementById('textureGalleryOverlay')) return;
+    const s=document.createElement('style'); s.textContent=STYLE; document.head.appendChild(s);
+    const o=document.createElement('div'); o.id='textureGalleryOverlay';
+    o.innerHTML='<h1>TEXTURE GALLERY</h1><div class="tgSub">procedural textures from the current skin system</div><div id="tgTabs"></div><div id="tgGrid"></div><button id="tgClose">CLOSE [ G / ESC ]</button>';
+    document.body.appendChild(o);
+    const d=document.createElement('div'); d.id='tgDetail';
+    d.innerHTML='<div id="tgDetailBox"><canvas id="tgDetailCanvas" width="520" height="520"></canvas><div id="tgDetailName"></div><div id="tgDetailInfo"></div><button id="tgDetailClose">BACK</button></div>';
+    document.body.appendChild(d);
+    let active='all';
+    const tabs=o.querySelector('#tgTabs'), grid=o.querySelector('#tgGrid');
+
+    function render(){
+      const gs=groups(); tabs.innerHTML='';
+      const add=(id,label)=>{const b=document.createElement('button');b.className='tgTab'+(active===id?' active':'');b.textContent=label;b.onclick=()=>{active=id;render()};tabs.appendChild(b)};
+      add('all','ALL'); gs.forEach(g=>add(g.id,g.name.toUpperCase()));
+      grid.innerHTML=''; const entries=[];
+      gs.forEach(g=>{if(active==='all'||active===g.id)g.items.forEach(item=>entries.push({g,item}))});
+      if(!entries.length){grid.innerHTML='<div style="grid-column:1/-1;color:#789;text-align:center;padding:30px">no procedural textures found.</div>';return;}
+      entries.forEach(({g,item})=>{
+        const card=document.createElement('div'); card.className='tgCard';
+        const c=document.createElement('canvas'); c.width=180;c.height=180; draw(item,g.type,c,3);
+        const n=document.createElement('div');n.className='tgName';n.textContent=item.name||item.id||'unnamed';
+        const t=document.createElement('div');t.className='tgType';t.textContent=g.name;
+        const r=document.createElement('div');r.className='tgLocked';r.textContent=req(item);
+        card.append(c,n,t,r);grid.appendChild(card);
+        card.onclick=()=>{const dc=d.querySelector('#tgDetailCanvas');draw(item,g.type,dc,7);d.querySelector('#tgDetailName').textContent=item.name||item.id||'unnamed';d.querySelector('#tgDetailInfo').textContent=g.name+' · '+(item.id||'no id')+' · '+req(item);d.classList.add('show')};
+      });
+    }
+
+    function close(){d.classList.remove('show');o.classList.remove('show');}
+    o.querySelector('#tgClose').onclick=close;
+    d.querySelector('#tgDetailClose').onclick=()=>d.classList.remove('show');
+    d.onclick=e=>{if(e.target===d)d.classList.remove('show')};
+    window.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){if(d.classList.contains('show'))d.classList.remove('show');else if(o.classList.contains('show'))close();}
+      if(e.key.toLowerCase()==='g'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&document.activeElement?.tagName!=='INPUT'&&document.activeElement?.tagName!=='TEXTAREA'){
+        if(o.classList.contains('show'))close();else{render();o.classList.add('show');}
+      }
+    });
+    const b=document.createElement('button');b.textContent='TEXTURE GALLERY';b.style.cssText="position:fixed;bottom:10px;left:10px;z-index:30;background:#123;color:#8cf;border:1px solid #145;padding:6px 10px;font:10px 'Courier New',monospace;cursor:pointer;box-shadow:none";b.onclick=()=>{render();o.classList.add('show')};document.body.appendChild(b);
+  }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build,{once:true});else build();
 })();
