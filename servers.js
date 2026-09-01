@@ -14,13 +14,13 @@ const SERVER_LIST = [
   {
     id: "server_2",
     name: "Server 2 (Tampere)",
-    databaseURL: "https://defineds2-default-rtdb.europe-west1.firebasedatabase.app",
+    databaseURL: "https://defineds2-default-rtdb.europe-west1.firebasedatabase.app/",
     maxPlayers: 100
   },
   {
     id: "server_3",
     name: "Server 3 (Oulu)",
-    databaseURL: "https://defineds3-default-rtdb.europe-west1.firebasedatabase.app",
+    databaseURL: "https://defineds3-e877b-default-rtdb.europe-west1.firebasedatabase.app/",
     maxPlayers: 100
   }
 ];
