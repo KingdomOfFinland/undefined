@@ -3,7 +3,7 @@
    Auto-tracks active players using Firebase Presence (.info/connected)
 =================================================== */
 
-// 1. EXACT SERVER URLS FOR DEFINEDS 1, 2, 3
+// 1. EXACT SERVER URLS FOR DEFINEDS 1, 2, 3 (Stripped trailing slashes)
 const SERVER_LIST = [
   {
     id: "server_1",
@@ -14,30 +14,52 @@ const SERVER_LIST = [
   {
     id: "server_2",
     name: "Server 2 (Tampere)",
-    databaseURL: "https://defineds2-default-rtdb.europe-west1.firebasedatabase.app/",
+    databaseURL: "https://defineds2-default-rtdb.europe-west1.firebasedatabase.app",
     maxPlayers: 100
   },
   {
     id: "server_3",
     name: "Server 3 (Oulu)",
-    databaseURL: "https://defineds3-e877b-default-rtdb.europe-west1.firebasedatabase.app/",
+    databaseURL: "https://defineds3-e877b-default-rtdb.europe-west1.firebasedatabase.app",
     maxPlayers: 100
   }
 ];
 
 let activeServerApp = null;
 let currentServerId = localStorage.getItem("selected_server") || SERVER_LIST[0].id;
+let currentPresenceRef = null;
+let currentConnectedRef = null;
 
-// 2. Track Player Presence (Automatically counts active players)
+// Ensure persistent Guest UID
+function getPlayerUID() {
+  if (firebase.auth().currentUser) {
+    return firebase.auth().currentUser.uid;
+  }
+  let guestUid = localStorage.getItem("game_guest_uid");
+  if (!guestUid) {
+    guestUid = "anon_" + Math.random().toString(36).substring(2, 7);
+    localStorage.setItem("game_guest_uid", guestUid);
+  }
+  return guestUid;
+}
+
+// 2. Track Player Presence (Auto-removes on disconnect or server switch)
 function trackPlayerPresence(dbInstance, uid) {
-  const userPresenceRef = dbInstance.ref("presence/" + uid);
-  const connectedRef = dbInstance.ref(".info/connected");
+  // Clean up existing listeners/presence on previous server
+  if (currentConnectedRef) {
+    currentConnectedRef.off();
+  }
+  if (currentPresenceRef) {
+    currentPresenceRef.remove();
+  }
 
-  connectedRef.on("value", (snap) => {
+  currentPresenceRef = dbInstance.ref("presence/" + uid);
+  currentConnectedRef = dbInstance.ref(".info/connected");
+
+  currentConnectedRef.on("value", (snap) => {
     if (snap.val() === true) {
-      // Auto-delete on disconnect/tab close
-      userPresenceRef.onDisconnect().remove();
-      userPresenceRef.set({
+      currentPresenceRef.onDisconnect().remove();
+      currentPresenceRef.set({
         joinedAt: Date.now(),
         name: localStorage.getItem("player_callsign") || "Pilot"
       });
@@ -63,7 +85,7 @@ function switchServer(serverId) {
   window.database = activeServerApp.database();
   
   // Track this user on the new server
-  const uid = localStorage.getItem("game_guest_uid") || (firebase.auth().currentUser ? firebase.auth().currentUser.uid : "anon_" + Math.random().toString(36).substring(2, 7));
+  const uid = getPlayerUID();
   trackPlayerPresence(window.database, uid);
 
   console.log(`🌐 Connected to ${server.name}`);
@@ -178,7 +200,10 @@ function initServerUI() {
 
 function updateServerButtonLabel(name) {
   const btn = document.getElementById("server-btn");
-  if (btn) btn.innerText = `🌐 ${name.split(" ")[0]} ${name.split(" ")[1] || ""}`;
+  if (btn) {
+    const parts = name.split(" ");
+    btn.innerText = `🌐 ${parts[0]} ${parts[1] || ""}`;
+  }
 }
 
 if (document.readyState === "loading") {
