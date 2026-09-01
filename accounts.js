@@ -3,17 +3,32 @@
    Bypasses school popups and auto-links to Firebase
 =================================================== */
 
-const accAuth = window.auth || (typeof firebase !== "undefined" ? firebase.auth() : null);
-const accDb = window.database || (typeof firebase !== "undefined" ? firebase.database() : null);
+// Dynamic getters to always reference the active server DB & Auth instance
+function getAuth() {
+  return window.auth || (typeof firebase !== "undefined" ? firebase.auth() : null);
+}
 
-// Helper: Convert clean callsign to an internal stealth auth email
+function getDb() {
+  return window.database || (typeof firebase !== "undefined" ? firebase.database() : null);
+}
+
+// Helper: Convert clean callsign to an internal stealth auth email safely
 function formatCallsignEmail(callsign) {
-  const clean = callsign.toLowerCase().trim().replace(/[^a-z0-9]/g, "");
+  // Hex encode non-alphanumeric chars to prevent email collisions (e.g. Ace_1 vs Ace-1)
+  const clean = callsign.trim().toLowerCase().replace(/[^a-z0-9]/g, (c) => c.charCodeAt(0).toString(16));
   return `${clean}@undefinedgame.local`;
 }
 
 // 1. REGISTER NEW ACCOUNT
 async function registerAccount(callsign, password) {
+  const auth = getAuth();
+  const db = getDb();
+
+  if (!auth || !db) {
+    alert("❌ Firebase not initialized yet!");
+    return;
+  }
+
   if (!callsign || callsign.length < 3 || callsign.length > 12) {
     alert("❌ Callsign must be between 3 and 12 characters!");
     return;
@@ -26,18 +41,18 @@ async function registerAccount(callsign, password) {
   const email = formatCallsignEmail(callsign);
 
   try {
-    const userCredential = await accAuth.createUserWithEmailAndPassword(email, password);
+    const userCredential = await auth.createUserWithEmailAndPassword(email, password);
     const user = userCredential.user;
 
     // Set Display Name
     await user.updateProfile({ displayName: callsign });
 
-    // Initialize Player Database Data
+    // Initialize Player Database Data on the active DB
     const initialData = {
       profile: { name: callsign },
       currency: { coins: 500, cash: 10, nuggets: 0 } // Starter pack!
     };
-    await accDb.ref("players/" + user.uid).update(initialData);
+    await db.ref("players/" + user.uid).update(initialData);
 
     localStorage.setItem("player_callsign", callsign);
     alert(`🎉 Account created! Welcome, ${callsign}!`);
@@ -53,10 +68,13 @@ async function registerAccount(callsign, password) {
 
 // 2. LOGIN TO EXISTING ACCOUNT
 async function loginAccount(callsign, password) {
+  const auth = getAuth();
+  if (!auth) return;
+
   const email = formatCallsignEmail(callsign);
 
   try {
-    const userCredential = await accAuth.signInWithEmailAndPassword(email, password);
+    const userCredential = await auth.signInWithEmailAndPassword(email, password);
     const user = userCredential.user;
     const name = user.displayName || callsign;
 
@@ -70,7 +88,10 @@ async function loginAccount(callsign, password) {
 
 // 3. LOGOUT
 async function logoutAccount() {
-  await accAuth.signOut();
+  const auth = getAuth();
+  if (auth) {
+    await auth.signOut();
+  }
   localStorage.removeItem("player_callsign");
   alert("Logged out successfully.");
   location.reload(); // Refresh to reset state
@@ -128,7 +149,8 @@ function initAccountUI() {
 
   // Event Listeners
   document.getElementById("auth-main-btn").onclick = () => {
-    if (accAuth.currentUser && !accAuth.currentUser.isAnonymous) {
+    const auth = getAuth();
+    if (auth && auth.currentUser && !auth.currentUser.isAnonymous) {
       logoutAccount();
     } else {
       modal.style.display = "block";
@@ -144,22 +166,25 @@ function initAccountUI() {
   };
 
   // Keep top-bar in sync with auth state
-  accAuth.onAuthStateChanged((user) => {
-    const display = document.getElementById("user-display");
-    const btn = document.getElementById("auth-main-btn");
+  const auth = getAuth();
+  if (auth) {
+    auth.onAuthStateChanged((user) => {
+      const display = document.getElementById("user-display");
+      const btn = document.getElementById("auth-main-btn");
 
-    if (user && !user.isAnonymous) {
-      display.innerText = `👤 ${user.displayName || "Pilot"}`;
-      btn.innerText = "LOGOUT";
-      btn.style.background = "#ef4444";
-      btn.style.color = "#fff";
-    } else {
-      display.innerText = "👤 Guest";
-      btn.innerText = "LOGIN";
-      btn.style.background = "#ffd700";
-      btn.style.color = "#000";
-    }
-  });
+      if (user && !user.isAnonymous) {
+        display.innerText = `👤 ${user.displayName || "Pilot"}`;
+        btn.innerText = "LOGOUT";
+        btn.style.background = "#ef4444";
+        btn.style.color = "#fff";
+      } else {
+        display.innerText = "👤 Guest";
+        btn.innerText = "LOGIN";
+        btn.style.background = "#ffd700";
+        btn.style.color = "#000";
+      }
+    });
+  }
 }
 
 if (document.readyState === "loading") {
