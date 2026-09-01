@@ -3,18 +3,24 @@
    Auto-tracks active players using Firebase Presence (.info/connected)
 =================================================== */
 
-// 1. CONFIGURATION: List your Firebase projects/servers here
+// 1. EXACT SERVER URLS FOR DEFINEDS 1, 2, 3
 const SERVER_LIST = [
   {
-    id: "server_helsinki",
+    id: "server_1",
     name: "Server 1 (Helsinki)",
-    databaseURL: "https://your-helsinki-game-rtdb.firebaseio.com",
+    databaseURL: "https://defineds1-default-rtdb.europe-west1.firebasedatabase.app",
     maxPlayers: 100
   },
   {
-    id: "server_tampere",
+    id: "server_2",
     name: "Server 2 (Tampere)",
-    databaseURL: "https://your-tampere-game-rtdb.firebaseio.com",
+    databaseURL: "https://defineds2-default-rtdb.europe-west1.firebasedatabase.app",
+    maxPlayers: 100
+  },
+  {
+    id: "server_3",
+    name: "Server 3 (Oulu)",
+    databaseURL: "https://defineds3-default-rtdb.europe-west1.firebasedatabase.app",
     maxPlayers: 100
   }
 ];
@@ -29,7 +35,7 @@ function trackPlayerPresence(dbInstance, uid) {
 
   connectedRef.on("value", (snap) => {
     if (snap.val() === true) {
-      // If the player disconnects/closes tab, Firebase server deletes their record automatically
+      // Auto-delete on disconnect/tab close
       userPresenceRef.onDisconnect().remove();
       userPresenceRef.set({
         joinedAt: Date.now(),
@@ -131,7 +137,6 @@ function initServerUI() {
   const container = document.getElementById("server-list-container");
 
   SERVER_LIST.forEach((server) => {
-    // Create temporary app instance for monitoring load
     let monitorApp;
     if (!firebase.apps.some((a) => a.name === "monitor_" + server.id)) {
       monitorApp = firebase.initializeApp({ databaseURL: server.databaseURL }, "monitor_" + server.id);
@@ -150,7 +155,7 @@ function initServerUI() {
     };
     container.appendChild(card);
 
-    // Listen to live player counts
+    // Live player count per server
     monitorApp.database().ref("presence").on("value", (snap) => {
       const count = snap.exists() ? Object.keys(snap.val()).length : 0;
       const status = getLoadStatus(count, server.maxPlayers);
@@ -167,7 +172,7 @@ function initServerUI() {
     });
   });
 
-  // Connect to default server on load
+  // Connect to default on load
   switchServer(currentServerId);
 }
 
