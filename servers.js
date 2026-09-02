@@ -30,11 +30,15 @@ let currentServerId = localStorage.getItem("selected_server") || SERVER_LIST[0].
 let currentPresenceRef = null;
 let currentConnectedRef = null;
 
-// Ensure persistent Guest UID
+// Safe retrieval of UID (Authenticated UID or persistent Guest UID)
 function getPlayerUID() {
-  if (firebase.auth().currentUser) {
-    return firebase.auth().currentUser.uid;
-  }
+  try {
+    if (typeof firebase !== "undefined" && firebase.auth && firebase.apps.length > 0) {
+      const user = firebase.auth().currentUser;
+      if (user) return user.uid;
+    }
+  } catch (e) {}
+
   let guestUid = localStorage.getItem("game_guest_uid");
   if (!guestUid) {
     guestUid = "anon_" + Math.random().toString(36).substring(2, 7);
@@ -43,8 +47,20 @@ function getPlayerUID() {
   return guestUid;
 }
 
+function getPlayerName() {
+  try {
+    if (typeof firebase !== "undefined" && firebase.auth && firebase.apps.length > 0) {
+      const user = firebase.auth().currentUser;
+      if (user && user.displayName) return user.displayName;
+    }
+  } catch (e) {}
+  return localStorage.getItem("player_callsign") || "Pilot";
+}
+
 // 2. Track Player Presence (Auto-removes on disconnect or server switch)
 function trackPlayerPresence(dbInstance, uid) {
+  if (!dbInstance) return;
+
   // Clean up existing listeners/presence on previous server
   if (currentConnectedRef) {
     currentConnectedRef.off();
@@ -61,7 +77,7 @@ function trackPlayerPresence(dbInstance, uid) {
       currentPresenceRef.onDisconnect().remove();
       currentPresenceRef.set({
         joinedAt: Date.now(),
-        name: localStorage.getItem("player_callsign") || "Pilot"
+        name: getPlayerName()
       });
     }
   });
@@ -69,11 +85,14 @@ function trackPlayerPresence(dbInstance, uid) {
 
 // 3. Connect to Selected Server
 function switchServer(serverId) {
-  const server = SERVER_LIST.find((s) => s.id === serverId);
-  if (!server) return;
+  if (typeof firebase === "undefined") {
+    console.warn("Firebase SDK not loaded yet.");
+    return;
+  }
 
-  currentServerId = serverId;
-  localStorage.setItem("selected_server", serverId);
+  const server = SERVER_LIST.find((s) => s.id === serverId) || SERVER_LIST[0];
+  currentServerId = server.id;
+  localStorage.setItem("selected_server", server.id);
 
   // Initialize or reuse app
   if (!firebase.apps.some((app) => app.name === server.id)) {
@@ -83,7 +102,7 @@ function switchServer(serverId) {
   }
 
   window.database = activeServerApp.database();
-  
+
   // Track this user on the new server
   const uid = getPlayerUID();
   trackPlayerPresence(window.database, uid);
@@ -96,13 +115,15 @@ function switchServer(serverId) {
 function getLoadStatus(count, max) {
   const ratio = count / max;
   if (ratio >= 1.0) return { label: "FULL", color: "#ef4444", bar: 100 };
-  if (ratio >= 0.75) return { label: "HIGH", color: "#f97316", bar: ratio * 100 };
-  if (ratio >= 0.35) return { label: "MEDIUM", color: "#eab308", bar: ratio * 100 };
+  if (ratio >= 0.75) return { label: "HIGH", color: "#f97316", bar: Math.min(100, ratio * 100) };
+  if (ratio >= 0.35) return { label: "MEDIUM", color: "#eab308", bar: Math.min(100, ratio * 100) };
   return { label: "OPTIMAL", color: "#22c55e", bar: Math.max(5, ratio * 100) };
 }
 
 // 4. Server Selection UI & Real-Time Listener
 function initServerUI() {
+  if (document.getElementById("server-btn")) return; // Prevent duplicate injection
+
   const style = document.createElement("style");
   style.innerHTML = `
     #server-btn {
@@ -136,7 +157,7 @@ function initServerUI() {
   // Top-Left Button
   const btn = document.createElement("button");
   btn.id = "server-btn";
-  btn.innerText = "🌐 Server 1";
+  btn.innerText = "🌐 Connecting...";
   btn.onclick = () => {
     const modal = document.getElementById("server-modal");
     modal.style.display = modal.style.display === "block" ? "none" : "block";
@@ -149,11 +170,15 @@ function initServerUI() {
   modal.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <h3 style="margin:0; color:#38bdf8;">🌐 SELECT SERVER</h3>
-      <button onclick="document.getElementById('server-modal').style.display='none'" style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;">✖</button>
+      <button id="server-modal-close" style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;">✖</button>
     </div>
     <div id="server-list-container"></div>
   `;
   document.body.appendChild(modal);
+
+  document.getElementById("server-modal-close").onclick = () => {
+    modal.style.display = "none";
+  };
 
   // Render Server Cards with Realtime Presence Listeners
   const container = document.getElementById("server-list-container");
@@ -176,6 +201,15 @@ function initServerUI() {
       document.getElementById("server-modal").style.display = "none";
     };
     container.appendChild(card);
+
+    // Initial placeholder
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; font-weight:bold;">
+        <span>${server.name}</span>
+        <span style="color:#22c55e; font-size:12px;">● CONNECTING...</span>
+      </div>
+      <div class="load-bar-bg"><div class="load-bar-fill" style="width:0%; background:#22c55e;"></div></div>
+    `;
 
     // Live player count per server
     monitorApp.database().ref("presence").on("value", (snap) => {
@@ -206,8 +240,24 @@ function updateServerButtonLabel(name) {
   }
 }
 
+// Re-track presence when user logs in/out
+window.addEventListener("playerAuthStateChanged", () => {
+  if (window.database) {
+    trackPlayerPresence(window.database, getPlayerUID());
+  }
+});
+
+// Safe init with retry if Firebase loads asynchronously
+function startServerManager() {
+  if (typeof firebase !== "undefined") {
+    initServerUI();
+  } else {
+    setTimeout(startServerManager, 100);
+  }
+}
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initServerUI);
+  document.addEventListener("DOMContentLoaded", startServerManager);
 } else {
-  initServerUI();
+  startServerManager();
 }
