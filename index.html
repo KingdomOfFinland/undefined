@@ -583,6 +583,76 @@
     }
   };
 
+  // ---------- Limited Items (time + quantity limited drops) ----------
+  // Item definitions live at limitedItems/items/{id} (admin-pushed, see the
+  // comment above LIMITED_PERK_DEFS). Claim counts live SEPARATELY at
+  // limitedItems/claimedCount/{id} so a runTransaction can atomically check
+  // "is there still stock" and increment in one round-trip — admin pushes to
+  // /items never touch that counter. Per-player claim records live at
+  // limitedItems/claimedBy/{id}/{playerKey} so the same player can't claim
+  // twice; checked before spending a transaction round-trip on the counter.
+  window.__fetchLimitedItems = async function(){
+    try{
+      const snap = await get(ref(db, 'limitedItems/items'));
+      return snap.exists() ? snap.val() : {};
+    } catch(e){
+      console.error('fetch limited items failed', e);
+      return {};
+    }
+  };
+  window.__fetchLimitedClaimedCounts = async function(){
+    try{
+      const snap = await get(ref(db, 'limitedItems/claimedCount'));
+      return snap.exists() ? snap.val() : {};
+    } catch(e){
+      console.error('fetch limited claim counts failed', e);
+      return {};
+    }
+  };
+  window.__hasClaimedLimitedItem = async function(itemId, playerName){
+    try{
+      const key = normalizeName(playerName || '').toLowerCase();
+      if(!key) return false;
+      const snap = await get(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key));
+      return snap.exists();
+    } catch(e){
+      console.error('check limited claim failed', e);
+      return false;
+    }
+  };
+  window.__claimLimitedItem = async function(itemId, playerName){
+    try{
+      const key = normalizeName(playerName || '').toLowerCase();
+      if(!key) return { ok:false, reason:'noname' };
+
+      const itemSnap = await get(ref(db, 'limitedItems/items/' + itemId));
+      if(!itemSnap.exists()) return { ok:false, reason:'gone' };
+      const item = itemSnap.val();
+      if(item.expiresAt && Date.now() > item.expiresAt) return { ok:false, reason:'expired' };
+
+      const claimedSnap = await get(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key));
+      if(claimedSnap.exists()) return { ok:false, reason:'already' };
+
+      // Atomic stock check-and-increment — this is the part that has to be a
+      // transaction: two players hitting claim on the last unit at the same
+      // moment must not both succeed. Whoever's transaction commits second
+      // sees the already-incremented value and aborts.
+      const countRef = ref(db, 'limitedItems/claimedCount/' + itemId);
+      const result = await runTransaction(countRef, (current) => {
+        const c = current || 0;
+        if(c >= item.stockTotal) return; // abort — sold out
+        return c + 1;
+      });
+      if(!result.committed) return { ok:false, reason:'soldout' };
+
+      await set(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key), { ts: Date.now() });
+      return { ok:true, item };
+    } catch(e){
+      console.error('claim limited item failed', e);
+      return { ok:false, reason:'error' };
+    }
+  };
+
   // ---------- Player-to-player donations ----------
   // Donations are queued at donations/{recipientKey}/{pushId} rather than added
   // directly to currency/{key}, because currency/{key} is a full overwrite
@@ -2651,6 +2721,39 @@ function convertCoinsToNuggets(){
   return true;
 }
  
+// ---------- Active perks (from Limited Items) ----------
+// Perks are temporary stat boosts granted by claiming a limited item.
+// Stored as { perkId: expiresAtMs } — stacking a perk you already have
+// EXTENDS the timer (adds duration on top of whichever is later: now or
+// the current expiry) rather than resetting it, so re-claiming never
+// shortens what you already had.
+function getActivePerks(){
+  let perks;
+  try { perks = JSON.parse(localStorage.getItem('uf_active_perks')) || {}; } catch(e){ perks = {}; }
+  const now = Date.now();
+  let changed = false;
+  Object.keys(perks).forEach(id => {
+    if(!perks[id] || perks[id] <= now){ delete perks[id]; changed = true; }
+  });
+  if(changed) localStorage.setItem('uf_active_perks', JSON.stringify(perks));
+  return perks;
+}
+function grantPerk(perkId, durationMs){
+  const perks = getActivePerks();
+  const base = Math.max(Date.now(), perks[perkId] || 0);
+  perks[perkId] = base + durationMs;
+  localStorage.setItem('uf_active_perks', JSON.stringify(perks));
+}
+// Sums the bonus amount of every currently-active perk matching an effect
+// type (e.g. 'firerate', 'hp', 'speed', 'coinmult') — lets multiple
+// different perks of the same effect stack additively.
+function getPerkBonus(effectType){
+  const active = getActivePerks();
+  return LIMITED_PERK_DEFS
+    .filter(p => p.effect === effectType && active[p.id])
+    .reduce((sum, p) => sum + p.amount, 0);
+}
+
 function getOwnedSkins(){
   try { return JSON.parse(localStorage.getItem('uf_owned_skins')) || []; } catch(e){ return []; }
 }
@@ -3321,7 +3424,7 @@ function tryFireGun(){
   if(player.fireCd>0) return;
   let cd = player.rapidFireT>0 ? 4 : 8;
   if(player.fireRateT>0) cd = Math.max(1, Math.round(cd*0.875)); // +12.5% fire rate (power-up)
-  cd = Math.max(1, Math.round(cd * (1 - getUpgradeBonus('upg_firerate')))); // permanent fire-rate upgrade, stacks
+  cd = Math.max(1, Math.round(cd * (1 - getUpgradeBonus('upg_firerate') - getPerkBonus('firerate')))); // permanent upgrade + temp limited-item perk, stacks
   player.fireCd = cd;
   SFX.shoot();
   bullets.push({ x:player.x, y:player.y-20, vx:0, vy:-12, w:4,h:10, side:'player' });
@@ -3987,7 +4090,7 @@ function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
  
 // Run kill multiplier: +0.1x per 100 kills this run. Persists through a
 // second-chance revive (killsThisRun only resets in resetGame), resets on death.
-function getKillMult(){ return 1 + Math.floor(killsThisRun/100)*0.1; }
+function getKillMult(){ return (1 + Math.floor(killsThisRun/100)*0.1) * (1 + getPerkBonus('coinmult')); }
  
 function addScore(amount){
   killsThisRun++;
@@ -4710,8 +4813,8 @@ async function resetGame(){
   score=0; wave=1;
   dyingTimer = 0;
   scoreLog = []; cheatFlagged = false; cheatReason = ''; killsThisRun = 0; cheatDetectedThisRun = false;
-  player.maxHp = Math.round(PLAYER_BASE_HP * (1 + getUpgradeBonus('upg_hp')));
-  player.speed = PLAYER_BASE_SPEED * (1 + getUpgradeBonus('upg_speed'));
+  player.maxHp = Math.round(PLAYER_BASE_HP * (1 + getUpgradeBonus('upg_hp') + getPerkBonus('hp')));
+  player.speed = PLAYER_BASE_SPEED * (1 + getUpgradeBonus('upg_speed') + getPerkBonus('speed'));
   player.hp=player.maxHp; player.x=W/2; player.y=H-90;
   player.flares=3; player.lockTarget=null; player.lockProgress=0;
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
@@ -5457,6 +5560,43 @@ const BLACKMARKET_EXCHANGES = [
   { id:'bulk_cash_to_nuggets', name:'Cash-to-Nugget Deal', desc:'3 💵 → 300 🐔', costType:'cash', cost:3, giveType:'nuggets', giveAmount:300 }
 ];
  
+// ---------- Limited Items ----------
+// A rotating set of drops that are BOTH time-limited (expiresAt) and
+// quantity-limited (fixed stockTotal, first-come-first-served) — separate
+// from the Black Market's always-on rotation. Stock/expiry live entirely
+// server-side at limitedItems/items/{itemId} so every player sees the same
+// countdown and the same remaining count; claim-count and per-player claim
+// records are transaction-guarded (see __claimLimitedItem) so nobody can
+// double-claim or oversell past stockTotal even with simultaneous claims.
+//
+// Push a new drop from the admin console (after window.__adminSignIn()):
+//   window.__adminUpdateEntry('limitedItems/items', {
+//     drop_winter_ace: {
+//       name: 'Winter Ace Skin', desc: 'Frost-camo ship skin.',
+//       type: 'skin', payload: { key:'ship', skinId:'ship_winter_ace' },
+//       stockTotal: 200, expiresAt: Date.now() + 3*24*3600*1000
+//     }
+//   });
+// That merges into the existing item list (update(), not set()) — existing
+// drops keep running. To pull a drop early, set its own expiresAt to now via
+// the same call. type is 'skin' | 'currency' | 'perk':
+//   skin:     payload = { key: <skin category, e.g. 'ship'>, skinId, enemyType? }
+//             (skinId must already exist in the matching *_SKINS list below —
+//             this doesn't add a new skin, it just gates an existing one
+//             behind a limited claim instead of/in addition to its normal unlock)
+//   currency: payload = { coins?, cash?, nuggets? } — any subset, added on claim
+//   perk:     payload = { perkId } — perkId must match a LIMITED_PERK_DEFS id
+const LIMITED_PERK_DEFS = [
+  { id:'perk_firerate_boost', name:'Overclock Chip', desc:'+25% fire rate for 10 minutes.', effect:'firerate', amount:0.25, durationMs:10*60*1000, color:'#ff6b6b' },
+  { id:'perk_hp_boost', name:'Reinforced Hull', desc:'+30% max HP for 10 minutes.', effect:'hp', amount:0.30, durationMs:10*60*1000, color:'#5ecbff' },
+  { id:'perk_speed_boost', name:'Turbo Thrusters', desc:'+20% speed for 10 minutes.', effect:'speed', amount:0.20, durationMs:10*60*1000, color:'#ffd23d' },
+  { id:'perk_coin_magnet', name:'Coin Magnet', desc:'+50% coin drops for 15 minutes.', effect:'coinmult', amount:0.50, durationMs:15*60*1000, color:'#ffaa00' }
+];
+function limitedItemSkinList(key){
+  const cat = BLACKMARKET_SKIN_CATEGORIES.find(c => c.key === key);
+  return cat ? cat.list : [];
+}
+
 function blackMarketAllPossibleIds(){
   const ids = BLACKMARKET_CRATES.map(c => c.id);
   ABILITY_DEFS.forEach(a => ids.push('ability_' + a.id));
@@ -5521,6 +5661,36 @@ function applyCrateReward(rew){
   }
   return rew.label || 'Nothing this time';
 }
+
+// Applies a claimed limited item's payload to the player's local account
+// (currency/skins go through the same functions as everywhere else in the
+// game; perks are queued via grantPerk so they take effect for the next
+// run start / next shot, same as upgrades already do). Returns a short
+// display string for the claim toast.
+function applyLimitedItemReward(item){
+  if(item.type === 'currency'){
+    const p = item.payload || {};
+    const parts = [];
+    if(p.coins){ addCoins(p.coins); parts.push(`+${p.coins} 🪙`); }
+    if(p.cash){ addCash(p.cash); parts.push(`+${p.cash} 💵`); }
+    if(p.nuggets){ addNuggets(p.nuggets); parts.push(`+${p.nuggets} 🐔`); }
+    return parts.join('  ') || 'Nothing to claim';
+  }
+  if(item.type === 'skin'){
+    const p = item.payload || {};
+    if(!p.skinId) return 'Skin data missing';
+    ownSkin(p.skinId);
+    return `Unlocked skin: ${item.name || p.skinId}`;
+  }
+  if(item.type === 'perk'){
+    const p = item.payload || {};
+    const def = LIMITED_PERK_DEFS.find(d => d.id === p.perkId);
+    if(!def) return 'Perk data missing';
+    grantPerk(def.id, def.durationMs);
+    return `${def.name} active for ${Math.round(def.durationMs/60000)} min`;
+  }
+  return 'Claimed';
+}
  
 function openSkinsScreen(){
   const wrap = document.getElementById('wrap');
@@ -5531,6 +5701,7 @@ function openSkinsScreen(){
     { key:'upgrades', label:'UPGRADES', upgrades:true },
     { key:'abilities', label:'ABILITIES', abilities:true },
     { key:'blackmarket', label:'BLACK MARKET', blackmarket:true },
+    { key:'limited', label:'LIMITED', limited:true },
     { key:'display', label:'DISPLAY', display:true },
     { key:'loadout', label:'LOADOUT', loadout:true },
     { key:'ship', label:'SHIP', list:SHIP_SKINS },
@@ -5567,6 +5738,40 @@ function openSkinsScreen(){
     if(activeCat === 'blackmarket') renderGrid();
   }
   loadMarketStock();
+
+  // Limited Items tab state — items def, live claimed counts, and which of
+  // them THIS player has already claimed. All three are fetched once per
+  // Hangar visit (claim itself re-checks server-side anyway, so a stale
+  // local view here just means a worst-case "sold out" surprise on click,
+  // never an actual double-claim or overselling).
+  let limitedItems = null;
+  let limitedClaimedCounts = {};
+  let limitedClaimedByMe = {};
+  let limitedTickHandle = null;
+  async function loadLimitedItems(){
+    const [items, counts] = await Promise.all([
+      window.__fetchLimitedItems ? window.__fetchLimitedItems() : {},
+      window.__fetchLimitedClaimedCounts ? window.__fetchLimitedClaimedCounts() : {}
+    ]);
+    limitedItems = items || {};
+    limitedClaimedCounts = counts || {};
+    const myName = getUsername();
+    const checks = await Promise.all(
+      Object.keys(limitedItems).map(id =>
+        (window.__hasClaimedLimitedItem ? window.__hasClaimedLimitedItem(id, myName) : Promise.resolve(false))
+          .then(claimed => [id, claimed])
+      )
+    );
+    limitedClaimedByMe = Object.fromEntries(checks);
+    if(activeCat === 'limited') renderGrid();
+    // Re-render every 30s while this tab is open so countdowns visibly tick
+    // down and an item that expires mid-visit disappears/greys out without
+    // needing to leave and re-enter the Hangar.
+    if(!limitedTickHandle){
+      limitedTickHandle = setInterval(() => { if(activeCat === 'limited') renderGrid(); }, 30000);
+    }
+  }
+  loadLimitedItems();
  
   overlay.innerHTML = `
     <h1 style="font-size:22px;color:#0ff;text-shadow:0 0 10px #0ff;">HANGAR</h1>
@@ -6163,6 +6368,125 @@ function openSkinsScreen(){
       }
       return;
     }
+
+    if(cat.limited){
+      if(limitedItems === null){
+        const loading = document.createElement('div');
+        loading.style.cssText = 'grid-column:1/-1;text-align:center;color:#8cf;font-size:12px;padding:20px;';
+        loading.textContent = 'Checking limited drops...';
+        gridEl.appendChild(loading);
+        return;
+      }
+
+      const now = Date.now();
+      const entries = Object.entries(limitedItems)
+        .filter(([id, item]) => !item.expiresAt || item.expiresAt > now)
+        .sort((a, b) => (a[1].expiresAt || Infinity) - (b[1].expiresAt || Infinity));
+
+      if(!entries.length){
+        const empty = document.createElement('div');
+        empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#666;font-size:12px;padding:20px;';
+        empty.textContent = 'No limited drops right now — check back later.';
+        gridEl.appendChild(empty);
+        return;
+      }
+
+      function formatTimeLeft(ms){
+        if(ms <= 0) return 'expired';
+        const mins = Math.floor(ms / 60000);
+        if(mins < 60) return `${mins}m left`;
+        const hrs = Math.floor(mins / 60);
+        if(hrs < 24) return `${hrs}h left`;
+        return `${Math.floor(hrs / 24)}d left`;
+      }
+
+      entries.forEach(([id, item]) => {
+        const claimed = limitedClaimedCounts[id] || 0;
+        const total = item.stockTotal || 0;
+        const soldOut = claimed >= total;
+        const gotIt = !!limitedClaimedByMe[id];
+        const timeLeft = item.expiresAt ? item.expiresAt - now : null;
+
+        const card = document.createElement('div');
+        card.className = 'skinCard' + (gotIt ? ' equipped' : '');
+        card.style.padding = '10px';
+
+        const typeColor = item.type === 'skin' ? '#ff2fd6' : item.type === 'perk' ? '#5ecbff' : '#ffd23d';
+        const typeIcon = item.type === 'skin' ? '👕' : item.type === 'perk' ? '⚡' : '🪙';
+        const icon = document.createElement('div');
+        icon.style.cssText = `width:48px;height:48px;margin:0 auto 6px;border-radius:8px;background:${typeColor}22;border:1px solid ${typeColor};display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 12px ${typeColor}55;`;
+        icon.textContent = typeIcon;
+        card.appendChild(icon);
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skinName';
+        nameEl.textContent = item.name || id;
+        card.appendChild(nameEl);
+
+        if(item.desc){
+          const descEl = document.createElement('div');
+          descEl.style.cssText = 'font-size:9px;color:#9cd;margin-top:2px;';
+          descEl.textContent = item.desc;
+          card.appendChild(descEl);
+        }
+
+        const statusEl = document.createElement('div');
+        statusEl.style.cssText = 'font-size:9px;margin-top:4px;display:flex;flex-direction:column;gap:2px;';
+        const stockLine = document.createElement('div');
+        stockLine.style.color = soldOut ? '#f66' : '#8cf';
+        stockLine.textContent = `${claimed}/${total} claimed`;
+        statusEl.appendChild(stockLine);
+        if(timeLeft !== null){
+          const timeLine = document.createElement('div');
+          timeLine.style.color = timeLeft < 3600000 ? '#ffaa00' : '#8cf';
+          timeLine.textContent = formatTimeLeft(timeLeft);
+          statusEl.appendChild(timeLine);
+        }
+        card.appendChild(statusEl);
+
+        const req = document.createElement('div');
+        req.className = 'skinReq';
+        if(gotIt){
+          req.style.color = '#0f8';
+          req.textContent = 'CLAIMED ✓';
+        } else if(soldOut){
+          req.style.color = '#f66';
+          req.textContent = 'SOLD OUT';
+        } else {
+          req.style.color = '#ffd23d';
+          req.textContent = 'TAP TO CLAIM — FREE';
+        }
+        card.appendChild(req);
+
+        if(!gotIt && !soldOut){
+          card.onclick = async () => {
+            card.style.opacity = '0.5';
+            const myName = await ensureUsername();
+            const result = window.__claimLimitedItem ? await window.__claimLimitedItem(id, myName) : { ok:false, reason:'error' };
+            card.style.opacity = '1';
+            if(!result.ok){
+              SFX.shieldBlock();
+              req.style.color = '#f66';
+              req.textContent = result.reason === 'soldout' ? 'SOLD OUT' : result.reason === 'expired' ? 'EXPIRED' : result.reason === 'already' ? 'ALREADY CLAIMED' : 'CLAIM FAILED';
+              if(result.reason === 'soldout' || result.reason === 'expired'){
+                limitedClaimedCounts[id] = total; // reflect locally without a re-fetch
+              }
+              return;
+            }
+            const rewardText = applyLimitedItemReward(result.item || item);
+            SFX.powerupPickup();
+            limitedClaimedByMe[id] = true;
+            limitedClaimedCounts[id] = claimed + 1;
+            renderCurrency();
+            renderGrid();
+            req.textContent = rewardText;
+          };
+        }
+
+        gridEl.appendChild(card);
+      });
+      return;
+    }
  
     if(cat.display){
       const settings = getDisplaySettings();
@@ -6249,6 +6573,7 @@ function openSkinsScreen(){
  
   overlay.querySelector('#skinsCloseBtn').onclick = () => {
     SFX.uiClick();
+    if(limitedTickHandle){ clearInterval(limitedTickHandle); limitedTickHandle = null; }
     wrap.removeChild(overlay);
   };
 }
@@ -6484,13 +6809,7 @@ if(document.getElementById('center')){
   applyDisplaySettings();
 }
 
-// hey claude, just a reminder that, um... can you fix the resolution js file to fix mobile scaling and than you cam enter it on mobile, also the menu buttons, please dont stack them together
-// same for you chatgpt.
 </script>
-<script src="limiteds.js"></script>
-<script src="auctions.js"></script>
 <script src="texture-gallery.js"></script>
-<script src="accounts.js"></script>
-<script src="servers.js"></script>
 </body>
 </html>
