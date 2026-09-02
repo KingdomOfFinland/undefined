@@ -583,73 +583,89 @@
     }
   };
 
-  // ---------- Limited Items (time + quantity limited drops) ----------
-  // Item definitions live at limitedItems/items/{id} (admin-pushed, see the
-  // comment above LIMITED_PERK_DEFS). Claim counts live SEPARATELY at
-  // limitedItems/claimedCount/{id} so a runTransaction can atomically check
-  // "is there still stock" and increment in one round-trip — admin pushes to
-  // /items never touch that counter. Per-player claim records live at
-  // limitedItems/claimedBy/{id}/{playerKey} so the same player can't claim
-  // twice; checked before spending a transaction round-trip on the counter.
+  // ---------- Limited Items (time + quantity limited, price-gated) ----------
+  // Schema: limitedItems/{itemId} = { name, price, priceCurrency, totalStock,
+  // remainingStock, expiresAt, type, payload, desc } — ONE node per item;
+  // stock is decremented IN PLACE on that node (not a separate counter),
+  // because that's what the security rules validate: a non-admin write to
+  // limitedItems/{itemId} must drop remainingStock by exactly 1 from
+  // whatever the CURRENT server value is, and is refused outright if stock
+  // is already 0 or expiresAt has passed. runTransaction is still used
+  // client-side so concurrent claims resolve against the freshest value
+  // instead of racing on a stale read — the rule itself is the real
+  // backstop against overselling, this is just what makes a legitimate
+  // claim succeed on the first try instead of needing manual retries.
+  //
+  // NOTE: uid here comes from the existing Google sign-in (window.__playerSignIn),
+  // reused as a stand-in until the planned custom account system replaces
+  // it — this claim logic only needs *a* uid, so swapping the sign-in
+  // method later won't require touching anything below.
   window.__fetchLimitedItems = async function(){
     try{
-      const snap = await get(ref(db, 'limitedItems/items'));
+      const snap = await get(ref(db, 'limitedItems'));
       return snap.exists() ? snap.val() : {};
     } catch(e){
       console.error('fetch limited items failed', e);
       return {};
     }
   };
-  window.__fetchLimitedClaimedCounts = async function(){
+  window.__hasClaimedLimitedItem = async function(uid, itemId){
     try{
-      const snap = await get(ref(db, 'limitedItems/claimedCount'));
-      return snap.exists() ? snap.val() : {};
-    } catch(e){
-      console.error('fetch limited claim counts failed', e);
-      return {};
-    }
-  };
-  window.__hasClaimedLimitedItem = async function(itemId, playerName){
-    try{
-      const key = normalizeName(playerName || '').toLowerCase();
-      if(!key) return false;
-      const snap = await get(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key));
+      if(!uid) return false;
+      const snap = await get(ref(db, 'players/' + uid + '/limitedInventory/' + itemId));
       return snap.exists();
     } catch(e){
       console.error('check limited claim failed', e);
       return false;
     }
   };
-  window.__claimLimitedItem = async function(itemId, playerName){
+  window.__claimLimitedItem = async function(uid, itemId){
     try{
-      const key = normalizeName(playerName || '').toLowerCase();
-      if(!key) return { ok:false, reason:'noname' };
+      if(!uid) return { ok:false, reason:'notsignedin' };
 
-      const itemSnap = await get(ref(db, 'limitedItems/items/' + itemId));
-      if(!itemSnap.exists()) return { ok:false, reason:'gone' };
-      const item = itemSnap.val();
-      if(item.expiresAt && Date.now() > item.expiresAt) return { ok:false, reason:'expired' };
+      // Soft check first so a player who's clearly already claimed doesn't
+      // spend a transaction round-trip on the stock node for nothing — the
+      // real guarantee against a double-claim slipping through on a race is
+      // just re-running this after any failed/retried claim attempt.
+      const alreadySnap = await get(ref(db, 'players/' + uid + '/limitedInventory/' + itemId));
+      if(alreadySnap.exists()) return { ok:false, reason:'already' };
 
-      const claimedSnap = await get(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key));
-      if(claimedSnap.exists()) return { ok:false, reason:'already' };
-
-      // Atomic stock check-and-increment — this is the part that has to be a
-      // transaction: two players hitting claim on the last unit at the same
-      // moment must not both succeed. Whoever's transaction commits second
-      // sees the already-incremented value and aborts.
-      const countRef = ref(db, 'limitedItems/claimedCount/' + itemId);
-      const result = await runTransaction(countRef, (current) => {
-        const c = current || 0;
-        if(c >= item.stockTotal) return; // abort — sold out
-        return c + 1;
+      const itemRef = ref(db, 'limitedItems/' + itemId);
+      let finalItem = null;
+      const result = await runTransaction(itemRef, (item) => {
+        if(!item) return; // abort — no such item
+        if(item.remainingStock <= 0) return; // abort — sold out
+        if(item.expiresAt && Date.now() > item.expiresAt) return; // abort — expired
+        finalItem = { ...item, remainingStock: item.remainingStock - 1 };
+        return finalItem; // must be the FULL object — the rule requires
+                           // name/price/totalStock/remainingStock/expiresAt
+                           // all present on every write to this path
       });
-      if(!result.committed) return { ok:false, reason:'soldout' };
+      if(!result.committed || !finalItem) return { ok:false, reason:'soldout' };
 
-      await set(ref(db, 'limitedItems/claimedBy/' + itemId + '/' + key), { ts: Date.now() });
-      return { ok:true, item };
+      const claimedCount = finalItem.totalStock - finalItem.remainingStock;
+      const serial = String(claimedCount).padStart(4, '0') + '/' + finalItem.totalStock;
+      await set(ref(db, 'players/' + uid + '/limitedInventory/' + itemId), {
+        name: finalItem.name || itemId, serial, origin: 'limited-drop', ts: Date.now()
+      });
+      await push(ref(db, 'players/' + uid + '/purchases'), {
+        item: finalItem.name || itemId, price: finalItem.price || 0, ts: Date.now()
+      });
+
+      return { ok:true, item: finalItem, serial };
     } catch(e){
       console.error('claim limited item failed', e);
       return { ok:false, reason:'error' };
+    }
+  };
+  window.__syncPlayerCurrency = async function(uid, coins, cash, nuggets){
+    try{
+      if(!uid) return false;
+      await set(ref(db, 'players/' + uid + '/currency'), { coins, cash, nuggets });
+      return true;
+    } catch(e){
+      console.error('player currency sync failed', e);
+      return false;
     }
   };
 
@@ -4607,6 +4623,9 @@ function syncCurrencyToServer(){
   const name = getUsername();
   if(!name || !window.__submitCurrency || !currentUser) return;
   window.__submitCurrency(name, getCoins(), getCash(), getNuggets()).catch(()=>{});
+  // Also keeps players/{uid}/currency in sync — that's the balance limited
+  // items spend from. Same trigger, same data, just a second destination.
+  if(window.__syncPlayerCurrency) window.__syncPlayerCurrency(currentUser.uid, getCoins(), getCash(), getNuggets()).catch(()=>{});
 }
  
  
@@ -5562,19 +5581,30 @@ const BLACKMARKET_EXCHANGES = [
  
 // ---------- Limited Items ----------
 // A rotating set of drops that are BOTH time-limited (expiresAt) and
-// quantity-limited (fixed stockTotal, first-come-first-served) — separate
-// from the Black Market's always-on rotation. Stock/expiry live entirely
-// server-side at limitedItems/items/{itemId} so every player sees the same
-// countdown and the same remaining count; claim-count and per-player claim
-// records are transaction-guarded (see __claimLimitedItem) so nobody can
-// double-claim or oversell past stockTotal even with simultaneous claims.
+// quantity-limited (remainingStock, first-come-first-served), sold for a
+// price rather than free — separate from the Black Market's always-on
+// rotation. Each claimed unit is numbered (a "serial", e.g. "0042/500")
+// and recorded under the claiming player's own account
+// (players/{uid}/limitedInventory), which is what will let it be re-listed
+// on the planned auction system later — it's a specific numbered unit
+// changing hands, not just a boolean "do you own this skin" flag.
+//
+// Schema (matches the actual Firebase rules — see limitedItems/{itemId}):
+//   limitedItems/{itemId} = {
+//     name, desc,                      // display
+//     price, priceCurrency,            // priceCurrency: 'coins'|'cash'|'nuggets', defaults to coins
+//     totalStock, remainingStock,      // remainingStock decrements in place on claim
+//     expiresAt,                       // ms timestamp
+//     type, payload                    // 'skin' | 'currency' | 'perk' — see below
+//   }
 //
 // Push a new drop from the admin console (after window.__adminSignIn()):
-//   window.__adminUpdateEntry('limitedItems/items', {
+//   window.__adminUpdateEntry('limitedItems', {
 //     drop_winter_ace: {
 //       name: 'Winter Ace Skin', desc: 'Frost-camo ship skin.',
+//       price: 5000, priceCurrency: 'coins',
 //       type: 'skin', payload: { key:'ship', skinId:'ship_winter_ace' },
-//       stockTotal: 200, expiresAt: Date.now() + 3*24*3600*1000
+//       totalStock: 200, remainingStock: 200, expiresAt: Date.now() + 3*24*3600*1000
 //     }
 //   });
 // That merges into the existing item list (update(), not set()) — existing
@@ -5739,30 +5769,26 @@ function openSkinsScreen(){
   }
   loadMarketStock();
 
-  // Limited Items tab state — items def, live claimed counts, and which of
-  // them THIS player has already claimed. All three are fetched once per
-  // Hangar visit (claim itself re-checks server-side anyway, so a stale
-  // local view here just means a worst-case "sold out" surprise on click,
-  // never an actual double-claim or overselling).
+  // Limited Items tab state — item defs (which already carry
+  // remainingStock/totalStock/expiresAt) plus which of them THIS player has
+  // already claimed. Claim itself re-checks server-side anyway (both the
+  // already-claimed lookup and the stock transaction), so a stale local
+  // view here just means a worst-case "sold out" surprise on click, never
+  // an actual double-claim or overselling.
   let limitedItems = null;
-  let limitedClaimedCounts = {};
   let limitedClaimedByMe = {};
   let limitedTickHandle = null;
   async function loadLimitedItems(){
-    const [items, counts] = await Promise.all([
-      window.__fetchLimitedItems ? window.__fetchLimitedItems() : {},
-      window.__fetchLimitedClaimedCounts ? window.__fetchLimitedClaimedCounts() : {}
-    ]);
-    limitedItems = items || {};
-    limitedClaimedCounts = counts || {};
-    const myName = getUsername();
-    const checks = await Promise.all(
-      Object.keys(limitedItems).map(id =>
-        (window.__hasClaimedLimitedItem ? window.__hasClaimedLimitedItem(id, myName) : Promise.resolve(false))
-          .then(claimed => [id, claimed])
-      )
-    );
-    limitedClaimedByMe = Object.fromEntries(checks);
+    limitedItems = window.__fetchLimitedItems ? await window.__fetchLimitedItems() : {};
+    limitedClaimedByMe = {};
+    if(currentUser && window.__hasClaimedLimitedItem){
+      const checks = await Promise.all(
+        Object.keys(limitedItems).map(id =>
+          window.__hasClaimedLimitedItem(currentUser.uid, id).then(claimed => [id, claimed])
+        )
+      );
+      limitedClaimedByMe = Object.fromEntries(checks);
+    }
     if(activeCat === 'limited') renderGrid();
     // Re-render every 30s while this tab is open so countdowns visibly tick
     // down and an item that expires mid-visit disappears/greys out without
@@ -6401,11 +6427,16 @@ function openSkinsScreen(){
       }
 
       entries.forEach(([id, item]) => {
-        const claimed = limitedClaimedCounts[id] || 0;
-        const total = item.stockTotal || 0;
-        const soldOut = claimed >= total;
+        const remaining = item.remainingStock || 0;
+        const total = item.totalStock || 0;
+        const soldOut = remaining <= 0;
         const gotIt = !!limitedClaimedByMe[id];
         const timeLeft = item.expiresAt ? item.expiresAt - now : null;
+        const price = item.price || 0;
+        const currencyType = item.priceCurrency || 'coins';
+        const currencyIcon = currencyType === 'cash' ? '💵' : currencyType === 'nuggets' ? '🐔' : '🪙';
+        const getBalance = currencyType === 'cash' ? getCash : currencyType === 'nuggets' ? getNuggets : getCoins;
+        const spendBalance = currencyType === 'cash' ? spendCash : currencyType === 'nuggets' ? spendNuggets : spendCoins;
 
         const card = document.createElement('div');
         card.className = 'skinCard' + (gotIt ? ' equipped' : '');
@@ -6434,7 +6465,7 @@ function openSkinsScreen(){
         statusEl.style.cssText = 'font-size:9px;margin-top:4px;display:flex;flex-direction:column;gap:2px;';
         const stockLine = document.createElement('div');
         stockLine.style.color = soldOut ? '#f66' : '#8cf';
-        stockLine.textContent = `${claimed}/${total} claimed`;
+        stockLine.textContent = `${total - remaining}/${total} claimed`;
         statusEl.appendChild(stockLine);
         if(timeLeft !== null){
           const timeLine = document.createElement('div');
@@ -6454,32 +6485,43 @@ function openSkinsScreen(){
           req.textContent = 'SOLD OUT';
         } else {
           req.style.color = '#ffd23d';
-          req.textContent = 'TAP TO CLAIM — FREE';
+          req.textContent = `${currencyIcon} ${price.toLocaleString()}`;
         }
         card.appendChild(req);
 
         if(!gotIt && !soldOut){
           card.onclick = async () => {
+            if(!currentUser){
+              const user = await doPlayerSignIn();
+              if(!user){ SFX.shieldBlock(); req.textContent = 'SIGN IN TO CLAIM'; req.style.color = '#f66'; return; }
+            }
+            if(getBalance() < price){
+              SFX.shieldBlock();
+              req.style.color = '#f66';
+              req.textContent = 'NOT ENOUGH ' + currencyIcon;
+              return;
+            }
             card.style.opacity = '0.5';
-            const myName = await ensureUsername();
-            const result = window.__claimLimitedItem ? await window.__claimLimitedItem(id, myName) : { ok:false, reason:'error' };
+            const result = window.__claimLimitedItem ? await window.__claimLimitedItem(currentUser.uid, id) : { ok:false, reason:'error' };
             card.style.opacity = '1';
             if(!result.ok){
               SFX.shieldBlock();
               req.style.color = '#f66';
-              req.textContent = result.reason === 'soldout' ? 'SOLD OUT' : result.reason === 'expired' ? 'EXPIRED' : result.reason === 'already' ? 'ALREADY CLAIMED' : 'CLAIM FAILED';
+              req.textContent = result.reason === 'soldout' ? 'SOLD OUT' : result.reason === 'expired' ? 'EXPIRED' : result.reason === 'already' ? 'ALREADY CLAIMED' : result.reason === 'notsignedin' ? 'SIGN IN TO CLAIM' : 'CLAIM FAILED';
               if(result.reason === 'soldout' || result.reason === 'expired'){
-                limitedClaimedCounts[id] = total; // reflect locally without a re-fetch
+                item.remainingStock = 0; // reflect locally without a re-fetch
               }
               return;
             }
+            spendBalance(price); // charge AFTER the server confirms the claim succeeded
+            syncCurrencyToServer();
             const rewardText = applyLimitedItemReward(result.item || item);
             SFX.powerupPickup();
             limitedClaimedByMe[id] = true;
-            limitedClaimedCounts[id] = claimed + 1;
+            item.remainingStock = (result.item && result.item.remainingStock) ?? Math.max(0, remaining - 1);
             renderCurrency();
             renderGrid();
-            req.textContent = rewardText;
+            req.textContent = `${rewardText} · #${result.serial || ''}`;
           };
         }
 
@@ -6809,6 +6851,8 @@ if(document.getElementById('center')){
   applyDisplaySettings();
 }
 
+// hey claude, just a reminder that, um... can you fix the resolution js file to fix mobile scaling and than you cam enter it on mobile, also the menu buttons, please dont stack them together
+// same for you chatgpt.
 </script>
 <script src="texture-gallery.js"></script>
 </body>
