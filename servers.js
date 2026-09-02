@@ -3,7 +3,6 @@
    Auto-tracks active players using Firebase Presence (.info/connected)
 =================================================== */
 
-// 1. EXACT SERVER URLS FOR DEFINEDS 1, 2, 3 (Stripped trailing slashes)
 const SERVER_LIST = [
   {
     id: "server_1",
@@ -30,7 +29,6 @@ let currentServerId = localStorage.getItem("selected_server") || SERVER_LIST[0].
 let currentPresenceRef = null;
 let currentConnectedRef = null;
 
-// Safe retrieval of UID (Authenticated UID or persistent Guest UID)
 function getPlayerUID() {
   try {
     if (typeof firebase !== "undefined" && firebase.auth && firebase.apps.length > 0) {
@@ -57,17 +55,11 @@ function getPlayerName() {
   return localStorage.getItem("player_callsign") || "Pilot";
 }
 
-// 2. Track Player Presence (Auto-removes on disconnect or server switch)
 function trackPlayerPresence(dbInstance, uid) {
   if (!dbInstance) return;
 
-  // Clean up existing listeners/presence on previous server
-  if (currentConnectedRef) {
-    currentConnectedRef.off();
-  }
-  if (currentPresenceRef) {
-    currentPresenceRef.remove();
-  }
+  if (currentConnectedRef) currentConnectedRef.off();
+  if (currentPresenceRef) currentPresenceRef.remove();
 
   currentPresenceRef = dbInstance.ref("presence/" + uid);
   currentConnectedRef = dbInstance.ref(".info/connected");
@@ -83,18 +75,13 @@ function trackPlayerPresence(dbInstance, uid) {
   });
 }
 
-// 3. Connect to Selected Server
 function switchServer(serverId) {
-  if (typeof firebase === "undefined") {
-    console.warn("Firebase SDK not loaded yet.");
-    return;
-  }
+  if (typeof firebase === "undefined") return;
 
   const server = SERVER_LIST.find((s) => s.id === serverId) || SERVER_LIST[0];
   currentServerId = server.id;
   localStorage.setItem("selected_server", server.id);
 
-  // Initialize or reuse app
   if (!firebase.apps.some((app) => app.name === server.id)) {
     activeServerApp = firebase.initializeApp({ databaseURL: server.databaseURL }, server.id);
   } else {
@@ -102,16 +89,12 @@ function switchServer(serverId) {
   }
 
   window.database = activeServerApp.database();
-
-  // Track this user on the new server
-  const uid = getPlayerUID();
-  trackPlayerPresence(window.database, uid);
+  trackPlayerPresence(window.database, getPlayerUID());
 
   console.log(`🌐 Connected to ${server.name}`);
   updateServerButtonLabel(server.name);
 }
 
-// Helper: Calculate load status text & color
 function getLoadStatus(count, max) {
   const ratio = count / max;
   if (ratio >= 1.0) return { label: "FULL", color: "#ef4444", bar: 100 };
@@ -120,24 +103,25 @@ function getLoadStatus(count, max) {
   return { label: "OPTIMAL", color: "#22c55e", bar: Math.max(5, ratio * 100) };
 }
 
-// 4. Server Selection UI & Real-Time Listener
 function initServerUI() {
-  if (document.getElementById("server-btn")) return; // Prevent duplicate injection
+  if (document.getElementById("server-btn")) return;
 
   const style = document.createElement("style");
   style.innerHTML = `
     #server-btn {
-      position: fixed; top: 12px; left: 12px; z-index: 99998;
+      position: fixed; top: 12px; right: 210px; z-index: 100000;
       background: #11111a; border: 1px solid #38bdf8; border-radius: 8px;
       padding: 6px 12px; color: #38bdf8; font-family: monospace;
-      font-weight: bold; cursor: pointer;
+      font-weight: bold; cursor: pointer; display: block !important;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
     }
+    #server-btn:hover { background: #1a1a2e; }
     #server-modal {
       display: none; position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%); width: 360px;
       background: #13131e; color: #fff; border: 2px solid #38bdf8;
-      border-radius: 12px; padding: 20px; z-index: 99999;
-      box-shadow: 0 0 30px rgba(56, 189, 248, 0.3); font-family: monospace;
+      border-radius: 12px; padding: 20px; z-index: 100001;
+      box-shadow: 0 0 30px rgba(56, 189, 248, 0.5); font-family: monospace;
     }
     .server-card {
       background: #1c1c2b; padding: 12px; border-radius: 8px;
@@ -154,10 +138,10 @@ function initServerUI() {
   `;
   document.head.appendChild(style);
 
-  // Top-Left Button
+  // Positioned right next to the login bar in the top right
   const btn = document.createElement("button");
   btn.id = "server-btn";
-  btn.innerText = "🌐 Connecting...";
+  btn.innerText = "🌐 Server 1";
   btn.onclick = () => {
     const modal = document.getElementById("server-modal");
     modal.style.display = modal.style.display === "block" ? "none" : "block";
@@ -180,15 +164,19 @@ function initServerUI() {
     modal.style.display = "none";
   };
 
-  // Render Server Cards with Realtime Presence Listeners
   const container = document.getElementById("server-list-container");
 
   SERVER_LIST.forEach((server) => {
     let monitorApp;
-    if (!firebase.apps.some((a) => a.name === "monitor_" + server.id)) {
-      monitorApp = firebase.initializeApp({ databaseURL: server.databaseURL }, "monitor_" + server.id);
-    } else {
-      monitorApp = firebase.app("monitor_" + server.id);
+    try {
+      if (!firebase.apps.some((a) => a.name === "monitor_" + server.id)) {
+        monitorApp = firebase.initializeApp({ databaseURL: server.databaseURL }, "monitor_" + server.id);
+      } else {
+        monitorApp = firebase.app("monitor_" + server.id);
+      }
+    } catch (e) {
+      console.error("Monitor app init error:", e);
+      return;
     }
 
     const card = document.createElement("div");
@@ -202,7 +190,6 @@ function initServerUI() {
     };
     container.appendChild(card);
 
-    // Initial placeholder
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; font-weight:bold;">
         <span>${server.name}</span>
@@ -211,24 +198,26 @@ function initServerUI() {
       <div class="load-bar-bg"><div class="load-bar-fill" style="width:0%; background:#22c55e;"></div></div>
     `;
 
-    // Live player count per server
-    monitorApp.database().ref("presence").on("value", (snap) => {
-      const count = snap.exists() ? Object.keys(snap.val()).length : 0;
-      const status = getLoadStatus(count, server.maxPlayers);
+    try {
+      monitorApp.database().ref("presence").on("value", (snap) => {
+        const count = snap.exists() ? Object.keys(snap.val()).length : 0;
+        const status = getLoadStatus(count, server.maxPlayers);
 
-      card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; font-weight:bold;">
-          <span>${server.name}</span>
-          <span style="color:${status.color}; font-size:12px;">● ${status.label} (${count}/${server.maxPlayers})</span>
-        </div>
-        <div class="load-bar-bg">
-          <div class="load-bar-fill" style="width:${status.bar}%; background:${status.color};"></div>
-        </div>
-      `;
-    });
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; font-weight:bold;">
+            <span>${server.name}</span>
+            <span style="color:${status.color}; font-size:12px;">● ${status.label} (${count}/${server.maxPlayers})</span>
+          </div>
+          <div class="load-bar-bg">
+            <div class="load-bar-fill" style="width:${status.bar}%; background:${status.color};"></div>
+          </div>
+        `;
+      });
+    } catch (e) {
+      console.error("Presence listener error:", e);
+    }
   });
 
-  // Connect to default on load
   switchServer(currentServerId);
 }
 
@@ -240,14 +229,12 @@ function updateServerButtonLabel(name) {
   }
 }
 
-// Re-track presence when user logs in/out
 window.addEventListener("playerAuthStateChanged", () => {
   if (window.database) {
     trackPlayerPresence(window.database, getPlayerUID());
   }
 });
 
-// Safe init with retry if Firebase loads asynchronously
 function startServerManager() {
   if (typeof firebase !== "undefined") {
     initServerUI();
