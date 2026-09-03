@@ -387,16 +387,26 @@
       console.error('username claim check failed', e);
       return { ok:false, reason:'error' };
     }
+    let uid;
     try{
       const result = await createUserWithEmailAndPassword(auth, accountEmail(username), password);
-      await set(ref(db, 'players/' + result.user.uid + '/username'), normalizeName(username));
-      return { ok:true, uid: result.user.uid };
+      uid = result.user.uid;
     } catch(e){
       if(e.code === 'auth/email-already-in-use') return { ok:false, reason:'taken' };
       if(e.code === 'auth/weak-password') return { ok:false, reason:'weakpassword' };
       console.error('account register failed', e);
       return { ok:false, reason:'error' };
     }
+    // Auth account exists at this point — registration succeeded regardless
+    // of whether this profile write lands, so failures here are logged but
+    // non-fatal (matches the players/$uid/profile {name} shape your rules
+    // validate, not a bare players/$uid/username string).
+    try{
+      await set(ref(db, 'players/' + uid + '/profile'), { name: normalizeName(username) });
+    } catch(e){
+      console.error('profile write failed (non-fatal)', e);
+    }
+    return { ok:true, uid };
   };
   window.__accountLogin = async function(username, password){
     const key = normalizeName(username).toLowerCase();
