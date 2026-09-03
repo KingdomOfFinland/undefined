@@ -246,18 +246,18 @@
     display:flex; align-items:center; gap:8px; font-size:11px; color:#8cf;
     justify-content:center; flex-wrap:wrap;
   }
-  #googleSignInBtn, #googleSignOutBtn {
+  #accountBtn {
     background:#123; color:#8cf; border:1px solid #145; font-size:11px;
     padding:6px 12px; font-weight:normal; box-shadow:none; display:flex;
     align-items:center; gap:6px;
   }
-  #googleSignInBtn:hover, #googleSignOutBtn:hover { background:#1a3a45; }
+  #accountBtn:hover { background:#1a3a45; }
   #authStatus { color:#5cff8a; }
   #authStatus.signedout { color:#8cf; }
 </style>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
@@ -333,9 +333,9 @@
     }
   };
 
-  // Player-facing Google sign-in — same provider, but this is the one the
-  // in-game "Sign in with Google" button calls. Kept separate from
-  // __adminSignIn so admin console usage stays unaffected by anything here.
+  // Superseded by __accountRegister/__accountLogin below, which is what the
+  // in-game Account button now calls — left in place unused in case Google
+  // linking gets added back for regular players later.
   window.__playerSignIn = async function(){
     try{
       const provider = new GoogleAuthProvider();
@@ -349,6 +349,67 @@
   window.__playerSignOut = async function(){
     try{ await signOut(auth); return true; }
     catch(e){ console.error('Sign-out failed', e); return false; }
+  };
+
+  // ---------- Player username/password accounts ----------
+  // Firebase Auth wants an email-shaped identifier, so a claimed callsign is
+  // mapped under the hood to a synthetic address (key@undefined-fighter.local)
+  // — players only ever see/type their callsign and a password, the "email"
+  // never appears anywhere. This reuses the SAME auth object as the Google
+  // admin sign-in above, so logging in as a player and signing in as admin
+  // are mutually exclusive on one tab (already true before this existed).
+  function accountEmail(username){
+    return normalizeName(username).toLowerCase() + '@undefined-fighter.local';
+  }
+  // Registers a NEW password for a callsign. Handles two cases the same way:
+  // a brand-new callsign (claims it in usernames/{key} first), or an
+  // existing guest-claimed callsign with no password behind it yet (skips
+  // the claim, since it's already theirs) — "securing" an existing name is
+  // just registering it. If the name already has a password, Firebase Auth
+  // itself rejects the create with 'email-already-in-use', which is what
+  // stops a stranger from hijacking someone else's secured callsign.
+  window.__accountRegister = async function(username, password){
+    const key = normalizeName(username).toLowerCase();
+    if(!key) return { ok:false, reason:'empty' };
+    if(!password || password.length < 6) return { ok:false, reason:'weakpassword' };
+    const nameRef = ref(db, 'usernames/' + key);
+    try{
+      const snap = await get(nameRef);
+      if(!snap.exists()){
+        const result = await runTransaction(nameRef, (current) => current === null ? true : undefined);
+        if(!result.committed){
+          // Lost a race to claim it — fall through, the auth call below
+          // will correctly fail with 'taken' if it's already secured, or
+          // succeed if it's still just an unsecured guest claim.
+        }
+      }
+    } catch(e){
+      console.error('username claim check failed', e);
+      return { ok:false, reason:'error' };
+    }
+    try{
+      const result = await createUserWithEmailAndPassword(auth, accountEmail(username), password);
+      await set(ref(db, 'players/' + result.user.uid + '/username'), normalizeName(username));
+      return { ok:true, uid: result.user.uid };
+    } catch(e){
+      if(e.code === 'auth/email-already-in-use') return { ok:false, reason:'taken' };
+      if(e.code === 'auth/weak-password') return { ok:false, reason:'weakpassword' };
+      console.error('account register failed', e);
+      return { ok:false, reason:'error' };
+    }
+  };
+  window.__accountLogin = async function(username, password){
+    const key = normalizeName(username).toLowerCase();
+    if(!key || !password) return { ok:false, reason:'empty' };
+    try{
+      const result = await signInWithEmailAndPassword(auth, accountEmail(username), password);
+      return { ok:true, uid: result.user.uid };
+    } catch(e){
+      if(e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password') return { ok:false, reason:'badpassword' };
+      if(e.code === 'auth/user-not-found') return { ok:false, reason:'notfound' };
+      console.error('account login failed', e);
+      return { ok:false, reason:'error' };
+    }
   };
 
   // ---------- IP lookup + hashing ----------
@@ -596,10 +657,10 @@
   // backstop against overselling, this is just what makes a legitimate
   // claim succeed on the first try instead of needing manual retries.
   //
-  // NOTE: uid here comes from the existing Google sign-in (window.__playerSignIn),
-  // reused as a stand-in until the planned custom account system replaces
-  // it — this claim logic only needs *a* uid, so swapping the sign-in
-  // method later won't require touching anything below.
+  // NOTE: uid here now comes from the username/password account system
+  // (__accountRegister/__accountLogin) — this claim logic only ever needed
+  // *a* uid, so the earlier Google-sign-in stand-in swapped out cleanly
+  // without touching anything below.
   window.__fetchLimitedItems = async function(){
     try{
       const snap = await get(ref(db, 'limitedItems'));
@@ -828,8 +889,8 @@
     <button id="btnSizeBtn">🔘 Button Size: NORMAL</button>
     <button id="difficultyBtn">⚔ Difficulty: NORMAL</button>
     <div id="authBar">
-      <button id="googleSignInBtn">🔐 Sign in with Google</button>
       <span id="authStatus" class="signedout"></span>
+      <button id="accountBtn">🔐 Account</button>
     </div>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
@@ -1357,11 +1418,11 @@ function updateRotateHint(){
 window.addEventListener('resize', updateRotateHint);
 window.addEventListener('orientationchange', updateRotateHint);
 
-// ---------- Player Google sign-in ----------
-// Separate from the admin console flow — this is what the in-game button
-// and the score-submit prompt use. Leaderboard/currency writes require
-// auth != null server-side, so signing in is what actually lets a run
-// count.
+// ---------- Player accounts (username/password) ----------
+// Separate from the Google-based admin console flow — this is what the
+// in-game Account button and the score-submit prompt use. Currency sync
+// and limited-item claims require auth != null server-side; the public
+// leaderboard itself never required signing in.
 let currentUser = null;
 if(window.__currentUser) currentUser = window.__currentUser;
 let donationWatchUnsub = null;
@@ -1399,27 +1460,82 @@ function startDonationWatch(){
 function stopDonationWatch(){
   if(donationWatchUnsub){ donationWatchUnsub(); donationWatchUnsub = null; donationWatchName = null; }
 }
-async function doPlayerSignIn(){
-  if(!window.__playerSignIn){ return null; }
-  const btn = document.getElementById('googleSignInBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Signing in...'; }
-  const user = await window.__playerSignIn();
-  if(btn) btn.disabled = false;
-  return user;
+// Username/password account modal. Resolves to the signed-in user object
+// (window.__currentUser) on success, or null if the player cancels. A
+// callsign with no password behind it yet is treated as "register" —
+// see __accountRegister for why that's safe against hijacking.
+function openAccountModal(){
+  return new Promise((resolve) => {
+    const wrap = document.getElementById('wrap');
+    const overlay = document.createElement('div');
+    overlay.id = 'accountOverlay';
+    overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:80; padding:16px;';
+    const existingName = (getUsername() || '').replace(/"/g,'');
+    overlay.innerHTML = `
+      <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
+        <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 8px;">PILOT ACCOUNT</h2>
+        <div style="font-size:10px; color:#8cf; margin-bottom:10px;">An account syncs your currency, skins &amp; inventory across devices and lets you join auctions. If your callsign is unclaimed or you haven't secured it yet, REGISTER sets its password for the first time.</div>
+        <input id="acctUser" placeholder="Callsign (max 12 chars)" maxlength="12" value="${existingName}" style="width:100%; box-sizing:border-box; margin-bottom:8px; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+        <input id="acctPass" type="password" placeholder="Password (6+ chars)" style="width:100%; box-sizing:border-box; margin-bottom:8px; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
+        <div id="acctStatus" style="font-size:10px; color:#f88; min-height:14px; margin-bottom:8px;"></div>
+        <div style="display:flex; gap:8px; justify-content:center; margin-bottom:8px;">
+          <button id="acctLoginBtn">LOG IN</button>
+          <button id="acctRegisterBtn">REGISTER</button>
+        </div>
+        <button id="acctCancelBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CANCEL</button>
+      </div>
+    `;
+    wrap.appendChild(overlay);
+    const statusEl = overlay.querySelector('#acctStatus');
+    function close(user){ wrap.removeChild(overlay); resolve(user || null); }
+    overlay.querySelector('#acctCancelBtn').onclick = () => { SFX.uiClick(); close(null); };
+
+    async function attempt(kind){
+      const nameIn = overlay.querySelector('#acctUser').value.trim();
+      const passIn = overlay.querySelector('#acctPass').value;
+      const loginBtn = overlay.querySelector('#acctLoginBtn');
+      const regBtn = overlay.querySelector('#acctRegisterBtn');
+      if(!nameIn){ statusEl.style.color = '#f88'; statusEl.textContent = 'Enter a callsign.'; return; }
+      if(!passIn || passIn.length < 6){ statusEl.style.color = '#f88'; statusEl.textContent = 'Password needs 6+ characters.'; return; }
+      const fn = kind === 'login' ? window.__accountLogin : window.__accountRegister;
+      if(!fn){ statusEl.style.color = '#f88'; statusEl.textContent = 'Accounts unavailable right now.'; return; }
+      loginBtn.disabled = true; regBtn.disabled = true;
+      statusEl.style.color = '#8cf'; statusEl.textContent = kind === 'login' ? 'Logging in...' : 'Registering...';
+      const result = await fn(nameIn, passIn);
+      if(result.ok){
+        setUsername(nameIn);
+        SFX.powerupPickup();
+        statusEl.style.color = '#0f8';
+        statusEl.textContent = kind === 'login' ? 'Logged in!' : 'Account secured!';
+        setTimeout(() => close(window.__currentUser), 500);
+      } else {
+        loginBtn.disabled = false; regBtn.disabled = false;
+        statusEl.style.color = '#f88';
+        statusEl.textContent = result.reason === 'taken' ? 'That callsign already has a password — log in instead.'
+          : result.reason === 'badpassword' ? 'Wrong password.'
+          : result.reason === 'notfound' ? 'No account with that callsign — try REGISTER.'
+          : result.reason === 'weakpassword' ? 'Password needs 6+ characters.'
+          : result.reason === 'empty' ? 'Enter a callsign and password.'
+          : 'Something went wrong — try again.';
+      }
+    }
+    overlay.querySelector('#acctLoginBtn').onclick = () => { SFX.uiClick(); attempt('login'); };
+    overlay.querySelector('#acctRegisterBtn').onclick = () => { SFX.uiClick(); attempt('register'); };
+  });
 }
 function wireAuthBar(){
-  const btn = document.getElementById('googleSignInBtn');
+  const btn = document.getElementById('accountBtn');
   const status = document.getElementById('authStatus');
   if(!btn || !status) return;
   if(currentUser){
     btn.textContent = '🔓 Sign out';
     btn.onclick = async () => { SFX.uiClick(); await window.__playerSignOut(); };
-    status.textContent = `Signed in as ${currentUser.name || currentUser.email || 'Google account'}`;
+    status.textContent = `Account: ${getUsername() || currentUser.email || 'secured'}`;
     status.classList.remove('signedout');
   } else {
-    btn.textContent = '🔐 Sign in with Google';
-    btn.onclick = async () => { SFX.uiClick(); await doPlayerSignIn(); };
-    status.textContent = 'Not signed in — currency sync won\'t save (leaderboard is fine)';
+    btn.textContent = '🔐 Account';
+    btn.onclick = async () => { SFX.uiClick(); await openAccountModal(); };
+    status.textContent = getUsername() ? `Playing as ${getUsername()} (no account — local only)` : 'No account — currency stays on this device only';
     status.classList.add('signedout');
   }
 }
@@ -4680,8 +4796,8 @@ function gameOver(){
     <button id="restartBtn">RELAUNCH</button>
     <button id="skinsBtnGO">SKINS</button>
     <div id="authBar">
-      <button id="googleSignInBtn">🔐 Sign in with Google</button>
       <span id="authStatus" class="signedout"></span>
+      <button id="accountBtn">🔐 Account</button>
     </div>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
@@ -5007,8 +5123,8 @@ function devShowShotDownPreview(){
     <button id="restartBtn">RELAUNCH</button>
     <button id="skinsBtnGO">SKINS</button>
     <div id="authBar">
-      <button id="googleSignInBtn">🔐 Sign in with Google</button>
       <span id="authStatus" class="signedout"></span>
+      <button id="accountBtn">🔐 Account</button>
     </div>
     <div class="lbCorner lbCornerLeft">
       <h2 style="color:#0ff;">TOP PILOTS</h2>
@@ -6492,8 +6608,8 @@ function openSkinsScreen(){
         if(!gotIt && !soldOut){
           card.onclick = async () => {
             if(!currentUser){
-              const user = await doPlayerSignIn();
-              if(!user){ SFX.shieldBlock(); req.textContent = 'SIGN IN TO CLAIM'; req.style.color = '#f66'; return; }
+              const user = await openAccountModal();
+              if(!user){ SFX.shieldBlock(); req.textContent = 'ACCOUNT NEEDED'; req.style.color = '#f66'; return; }
             }
             if(getBalance() < price){
               SFX.shieldBlock();
@@ -6667,9 +6783,14 @@ function openDonateScreen(onDone){
     const coins = Math.max(0, parseInt(overlay.querySelector('#donCoins').value, 10) || 0);
     const cash = Math.max(0, parseInt(overlay.querySelector('#donCash').value, 10) || 0);
     const nuggets = Math.max(0, parseInt(overlay.querySelector('#donNuggets').value, 10) || 0);
-    const myName = getUsername();
 
-    if(!currentUser){ statusEl.textContent = 'Sign in with Google first to donate.'; return; }
+    if(!currentUser){
+      statusEl.style.color = '#8cf'; statusEl.textContent = 'You need an account to donate...';
+      const user = await openAccountModal();
+      if(!user){ statusEl.style.color = '#f88'; statusEl.textContent = 'You need an account to donate.'; return; }
+      statusEl.textContent = '';
+    }
+    const myName = getUsername();
     if(!myName){ statusEl.textContent = 'Set a callsign first.'; return; }
     if(!targetRaw){ statusEl.textContent = 'Enter a recipient callsign.'; return; }
     if(targetRaw.toLowerCase() === myName.toLowerCase()){ statusEl.textContent = "You can't donate to yourself."; return; }
