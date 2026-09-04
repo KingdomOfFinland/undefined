@@ -1523,13 +1523,15 @@ function openModeSelectModal(){
     <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
       <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 14px;">SELECT MODE</h2>
       <button id="startBtn" style="width:100%; margin-bottom:10px;">LAUNCH</button>
+      <button id="earthModeBtn" style="width:100%; margin-bottom:10px;">🌍 EARTH MODE</button>
       <button id="solarModeBtn" style="width:100%; margin-bottom:14px;">☀ SOLAR PANEL MODE</button>
       <button id="modeCancelBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CANCEL</button>
     </div>
   `;
   wrap.appendChild(overlay);
   function close(){ wrap.removeChild(overlay); }
-  document.getElementById('startBtn').onclick = () => { SFX.uiClick(); close(); resetGame(); };
+  document.getElementById('startBtn').onclick = () => { SFX.uiClick(); close(); resetGame('space'); };
+  document.getElementById('earthModeBtn').onclick = () => { SFX.uiClick(); close(); resetGame('earth'); };
   document.getElementById('solarModeBtn').onclick = () => { SFX.uiClick(); close(); resetSolarGame(); };
   document.getElementById('modeCancelBtn').onclick = () => { SFX.uiClick(); close(); };
 }
@@ -4840,6 +4842,60 @@ function updateParticles(){
 }
  
 // ---------- Draw ----------
+// ---------- Damage-state visuals (purely cosmetic — HP-based smoke/scorch) ----------
+// Shared by drawPlayer() and drawEnemy() so skins and enemy types don't need
+// their own damage art — this draws on top of whatever sprite is already
+// there. Stateless (computed straight from hp ratio + frame + a per-entity
+// phase seed) rather than spawning real particles, so it costs nothing extra
+// in tick() and never desyncs from the current hp bar.
+function drawDamageState(cx, cy, radius, hpRatio, phase){
+  if(hpRatio >= 0.66) return; // undamaged — no overlay
+  const heavy = hpRatio < 0.33;
+
+  // scorch marks — dark blotches at fixed positions per entity (via `phase`)
+  ctx.save();
+  ctx.globalAlpha = heavy ? 0.55 : 0.35;
+  ctx.fillStyle = '#1a0f08';
+  const scorchCount = heavy ? 3 : 2;
+  for(let i=0;i<scorchCount;i++){
+    const a = phase + i*2.4;
+    const ox = Math.cos(a)*radius*0.4, oy = Math.sin(a)*radius*0.4;
+    ctx.beginPath();
+    ctx.ellipse(cx+ox, cy+oy, radius*0.22, radius*0.14, a, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // smoke wisps drifting upward, looping on frame count — no persistent
+  // particle state needed since it's purely a function of time+phase
+  const period = 90;
+  const wisps = heavy ? 3 : 2;
+  for(let i=0;i<wisps;i++){
+    const t = ((frame + i*(period/wisps) + phase*40) % period) / period; // 0..1
+    const sx = cx + Math.sin(phase+i)*radius*0.3;
+    const sy = cy - t*radius*2.2;
+    const size = (heavy ? 7 : 5) * (1 + t*0.8);
+    const alpha = (1-t) * (heavy ? 0.4 : 0.22);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = heavy ? '#222' : '#555';
+    ctx.beginPath(); ctx.arc(sx, sy, size, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // heavy tier only — occasional flickering spark, "about to explode"
+  if(heavy){
+    const flicker = 0.5 + Math.sin(frame*0.7+phase)*0.5;
+    if(flicker > 0.75){
+      ctx.save();
+      ctx.globalAlpha = flicker;
+      ctx.fillStyle = '#ffcf5c';
+      ctx.beginPath(); ctx.arc(cx+rand(-radius*0.3,radius*0.3), cy+rand(-radius*0.3,radius*0.3), 2.5, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
 function drawPlayer(){
   ctx.save();
   ctx.translate(player.x, player.y);
@@ -4867,6 +4923,7 @@ function drawPlayer(){
     ctx.fillStyle = `rgba(255,220,80,${flicker*0.8})`;
     ctx.beginPath(); ctx.arc(0,4,7,0,Math.PI*2); ctx.fill();
   }
+  drawDamageState(0, 0, 22, player.hp/player.maxHp, 1.7);
   ctx.restore();
 }
  
@@ -4890,6 +4947,7 @@ function drawEnemy(e){
     ctx.fillStyle='rgba(0,255,255,0.5)';
     ctx.fillRect(-3,e.h/2,6,H);
   }
+  drawDamageState(0, 0, Math.max(e.w,e.h)/2, e.hp/e.maxHp, e.phase||0);
   ctx.restore();
  
   // shield bar (Sentinel) — sits above the hp bar so both are visible while
@@ -4981,6 +5039,92 @@ function drawLockLine(){
   }
 }
  
+// ---------- Earth Mode background ----------
+// Purely cosmetic — same scroll-and-wrap trick as drawStars() below, just
+// swapping procedurally-scattered land/cloud blobs for star dots. No real
+// geography, no external images/API — regenerated fresh (new random layout)
+// each time Earth Mode is launched via resetGame('earth').
+let earthTheme = false;
+let earthTerrainCanvas = null;
+let earthCloudCanvas = null;
+const EARTH_TILE_H = 1536;
+const EARTH_CLOUD_TILE_H = 1024;
+
+function drawBlobShape(tctx, cx, cy, r, color, alpha){
+  tctx.save();
+  tctx.globalAlpha = alpha;
+  tctx.fillStyle = color;
+  tctx.beginPath();
+  const pts = 9 + Math.floor(rand(0,6));
+  for(let i=0;i<=pts;i++){
+    const a = (i/pts)*Math.PI*2;
+    const rr = r * (0.65 + Math.random()*0.55);
+    const x = cx + Math.cos(a)*rr, y = cy + Math.sin(a)*rr;
+    if(i===0) tctx.moveTo(x,y); else tctx.lineTo(x,y);
+  }
+  tctx.closePath(); tctx.fill();
+  tctx.restore();
+}
+// Draws a blob three times (offset by ±tileH) so anything straddling the
+// vertical wrap seam still looks continuous once the tile repeats.
+function drawWrappedBlob(tctx, cx, cy, r, color, alpha, tileH){
+  drawBlobShape(tctx, cx, cy, r, color, alpha);
+  drawBlobShape(tctx, cx, cy - tileH, r, color, alpha);
+  drawBlobShape(tctx, cx, cy + tileH, r, color, alpha);
+}
+
+function generateEarthBackground(){
+  earthTerrainCanvas = document.createElement('canvas');
+  earthTerrainCanvas.width = W; earthTerrainCanvas.height = EARTH_TILE_H;
+  const tctx = earthTerrainCanvas.getContext('2d');
+  tctx.fillStyle = '#0d3a52'; // ocean base
+  tctx.fillRect(0,0,W,EARTH_TILE_H);
+
+  const landColors = ['#2e6b34','#3a7d3f','#5c8a3a'];
+  const desertColors = ['#b5975a','#c7a862'];
+  const numLand = Math.floor(rand(5,9));
+  for(let i=0;i<numLand;i++){
+    const cx = rand(60, W-60), cy = rand(60, EARTH_TILE_H-60);
+    const r = rand(75,190);
+    const isDesert = Math.random() < 0.25;
+    const palette = isDesert ? desertColors : landColors;
+    const color = palette[Math.floor(Math.random()*palette.length)];
+    drawWrappedBlob(tctx, cx, cy, r, color, 1, EARTH_TILE_H);
+    // darker interior patches — forest clusters / field texture
+    const detailColor = isDesert ? '#9c8248' : '#245229';
+    for(let j=0;j<4;j++){
+      const ox = cx + rand(-r*0.5,r*0.5), oy = cy + rand(-r*0.5,r*0.5);
+      drawWrappedBlob(tctx, ox, oy, r*rand(0.18,0.35), detailColor, 0.55, EARTH_TILE_H);
+    }
+    // occasional small lake carved into a land mass
+    if(Math.random() < 0.5){
+      const lx = cx + rand(-r*0.3,r*0.3), ly = cy + rand(-r*0.3,r*0.3);
+      drawWrappedBlob(tctx, lx, ly, r*rand(0.12,0.22), '#1a5578', 0.9, EARTH_TILE_H);
+    }
+  }
+
+  earthCloudCanvas = document.createElement('canvas');
+  earthCloudCanvas.width = W; earthCloudCanvas.height = EARTH_CLOUD_TILE_H;
+  const cctx = earthCloudCanvas.getContext('2d');
+  const numClouds = Math.floor(rand(8,14));
+  for(let i=0;i<numClouds;i++){
+    const cx = rand(0,W), cy = rand(0,EARTH_CLOUD_TILE_H);
+    const r = rand(35,90);
+    drawWrappedBlob(cctx, cx, cy, r, '#ffffff', rand(0.12,0.28), EARTH_CLOUD_TILE_H);
+  }
+}
+
+function drawEarthBackground(){
+  if(!earthTerrainCanvas) generateEarthBackground();
+  const scrollSpeed = 1.4, cloudSpeed = 2.6; // clouds drift faster — parallax "closer to camera" feel
+  const ty = (frame*scrollSpeed) % EARTH_TILE_H;
+  ctx.drawImage(earthTerrainCanvas, 0, ty - EARTH_TILE_H, W, EARTH_TILE_H);
+  ctx.drawImage(earthTerrainCanvas, 0, ty, W, EARTH_TILE_H);
+  const cy = (frame*cloudSpeed) % EARTH_CLOUD_TILE_H;
+  ctx.drawImage(earthCloudCanvas, 0, cy - EARTH_CLOUD_TILE_H, W, EARTH_CLOUD_TILE_H);
+  ctx.drawImage(earthCloudCanvas, 0, cy, W, EARTH_CLOUD_TILE_H);
+}
+
 function drawStars(){
   ctx.fillStyle=starColor;
   for(let i=0;i<60;i++){
@@ -5050,7 +5194,7 @@ function render(){
     shakeT--;
   }
   ctx.clearRect(-10,-10,W+20,H+20);
-  drawStars();
+  if(earthTheme && gameMode !== 'solar') drawEarthBackground(); else drawStars();
   if(gameMode === 'solar'){
     drawSolarExtras();
     drawBullets();
@@ -5312,11 +5456,15 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
  
-async function resetGame(){
+async function resetGame(theme){
   const banState = getBanState();
   if(banState.banned){
     showCheatOverlay(0);
     return;
+  }
+  if(theme !== undefined){
+    earthTheme = (theme === 'earth');
+    if(earthTheme) generateEarthBackground(); // fresh random layout each time
   }
   await ensureUsername();
   currentDifficulty = getDifficultyDef(getDifficultyPref());
