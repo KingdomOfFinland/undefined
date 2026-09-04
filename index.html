@@ -843,6 +843,11 @@
       <span>🪙 <span id="coinCount">0</span> &nbsp; 💵 <span id="cashCount">0</span></span>
     </div>
   </div>
+  <div id="solarHud" class="hidden" style="position:absolute; top:6px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:2px; z-index:5; pointer-events:none;">
+    <div style="font-size:11px; color:#ffd23d; text-shadow:0 0 6px #ffb347;">☀ SOLAR POWER — <span id="solarTimeLeft">2:00</span></div>
+    <div class="bar-bg" style="width:220px;"><div class="bar-fill" id="solarPowerBar" style="width:100%; background:#ffd23d;"></div></div>
+    <div id="solarAimStatus" style="font-size:10px; color:#8cf;">A/D to aim panel — align &amp; clear the sun</div>
+  </div>
   <button id="muteBtn" title="Toggle sound">🔊</button>
   <button id="fullscreenBtn" title="Toggle fullscreen">⛶</button>
   <div id="lockind">LOCK ACQUIRED - HOLD Q</div>
@@ -893,6 +898,7 @@
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
     </p>
     <button id="startBtn">LAUNCH</button>
+    <button id="solarModeBtn">☀ SOLAR PANEL MODE</button>
     <button id="skinsBtnStart">SKINS</button>
     <button id="dailyBtn">🎁 DAILY</button>
     <button id="touchToggleBtn">📱 Touch Controls: AUTO</button>
@@ -3002,6 +3008,269 @@ function damagePlayer(amount){
   player.hp -= amount * currentDifficulty.dmgMult;
   return true;
 }
+
+// ---------- Solar Panel Mode ----------
+// A separate timed mode, not the normal wave grind. Sun sits fixed at the
+// top-middle of the screen (no scrolling camera in this game, so a screen
+// point is a world point). A/D rotate a dedicated panel angle — a distinct
+// control from WASD movement so aiming the panel is its own active task,
+// not just a side effect of dodging. W/S still move the ship up/down so
+// positioning still matters for line-of-sight around obstacles.
+let gameMode = 'normal';
+let solarPower = 100;
+let solarTimeLeft = 0;
+let solarPanelAngle = -Math.PI/2;
+let solarObstacles = [];
+let solarObstacleSpawnCd = 0;
+const SOLAR_DURATION_TICKS = 7200; // 120s @ 60 ticks/s
+const SOLAR_SUN = { x: W/2, y: 46 };
+const SOLAR_ALIGN_TOLERANCE = 0.3; // radians, ~17°
+const SOLAR_CHARGE_RATE = 100/150; // full recharge in 2.5s while powered
+const SOLAR_DRAIN_RATE = 100/240;  // full drain in 4s while unpowered
+const SOLAR_PANEL_TURN_RATE = 0.045; // rad/tick
+
+function angleDiff(a,b){
+  let d = (a-b) % (Math.PI*2);
+  if(d > Math.PI) d -= Math.PI*2;
+  if(d < -Math.PI) d += Math.PI*2;
+  return d;
+}
+
+// Point-to-segment distance — used to check whether an obstacle sits between
+// the player and the sun, not just whether the panel is pointed the right way.
+function distToSegment(px,py, ax,ay, bx,by){
+  const dx = bx-ax, dy = by-ay;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq>0 ? ((px-ax)*dx + (py-ay)*dy) / lenSq : 0;
+  t = clamp(t,0,1);
+  const cx = ax + t*dx, cy = ay + t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+
+function spawnSolarObstacle(){
+  const fromLeft = Math.random()<0.5;
+  solarObstacles.push({
+    x: fromLeft ? -30 : W+30,
+    y: rand(70, 280),
+    vx: (fromLeft ? 1 : -1) * rand(1.1, 2.1),
+    r: rand(16,26),
+    hp: 2,
+    alive: true
+  });
+}
+
+function updateSolarObstacles(){
+  solarObstacleSpawnCd--;
+  if(solarObstacleSpawnCd<=0){
+    spawnSolarObstacle();
+    solarObstacleSpawnCd = Math.round(rand(65,125));
+  }
+  for(const o of solarObstacles) o.x += o.vx;
+  // player bullets can clear a path — obstacles take 2 hits
+  for(const o of solarObstacles){
+    if(!o.alive) continue;
+    bullets = bullets.filter(b=>{
+      if(Math.hypot(b.x-o.x, b.y-o.y) < o.r+6){
+        o.hp--;
+        spawnParticles(o.x,o.y,'#ffb347',6,2.5,3);
+        if(o.hp<=0 && o.alive){
+          o.alive = false;
+          spawnParticles(o.x,o.y,'#ffb347',14,4,3.5);
+          SFX.explosion(0.5);
+        }
+        return false;
+      }
+      return true;
+    });
+  }
+  solarObstacles = solarObstacles.filter(o => o.alive && o.x > -60 && o.x < W+60);
+}
+
+function updateSolarPanel(){
+  const left = keys['a']||keys['arrowleft'];
+  const right = keys['d']||keys['arrowright'];
+  const gp = pollGamepad();
+  let turn = 0;
+  if(left) turn -= 1;
+  if(right) turn += 1;
+  if(gp) turn += gp.mx;
+  solarPanelAngle += clamp(turn,-1,1) * SOLAR_PANEL_TURN_RATE;
+
+  const sunAngle = Math.atan2(SOLAR_SUN.y - player.y, SOLAR_SUN.x - player.x);
+  const aligned = Math.abs(angleDiff(solarPanelAngle, sunAngle)) <= SOLAR_ALIGN_TOLERANCE;
+  const blocked = solarObstacles.some(o => distToSegment(o.x,o.y, player.x,player.y, SOLAR_SUN.x,SOLAR_SUN.y) < o.r+10);
+  const powered = aligned && !blocked;
+
+  if(powered){
+    solarPower = Math.min(100, solarPower + SOLAR_CHARGE_RATE);
+  } else {
+    solarPower = Math.max(0, solarPower - SOLAR_DRAIN_RATE);
+  }
+
+  // Shield only holds while power is topped off AND currently powered — the
+  // instant either drops, the shield drops with it, even if power itself
+  // hasn't hit zero yet. It only comes back once power climbs back to 100.
+  if(powered && solarPower>=100){
+    player.shieldT = 30;
+  } else if(!powered){
+    player.shieldT = 0;
+  }
+
+  const statusEl = document.getElementById('solarAimStatus');
+  if(statusEl){
+    if(blocked){ statusEl.textContent = 'BLOCKED — clear the obstacle'; statusEl.style.color = '#f66'; }
+    else if(!aligned){ statusEl.textContent = 'MISALIGNED — A/D to aim panel'; statusEl.style.color = '#fc0'; }
+    else { statusEl.textContent = 'LOCKED ON SUN'; statusEl.style.color = '#0f8'; }
+  }
+}
+
+function tickSolar(){
+  updatePlayerSolarMove();
+  updatePowerupTimers();
+  updateBullets();
+  updatePlayerFire();
+  updateSolarPanel();
+  updateSolarObstacles();
+  updateParticles();
+  updateHudSolar();
+
+  // Flying into the sun or an obstacle is instant death — this is why
+  // dodging still matters even once you've got the panel aimed right.
+  if(Math.hypot(player.x-SOLAR_SUN.x, player.y-SOLAR_SUN.y) < 46){
+    spawnParticles(player.x,player.y,'#ffd23d',22,5,4);
+    spawnParticles(player.x,player.y,'#fff',10,3,4.5);
+    SFX.explosion(1);
+    solarEnd(false, 'You flew straight into the sun. Melted instantly.');
+    return;
+  }
+  for(const o of solarObstacles){
+    if(o.alive && Math.hypot(player.x-o.x, player.y-o.y) < o.r+16){
+      spawnParticles(player.x,player.y,'#ff4d6d',20,4.5,4);
+      spawnParticles(player.x,player.y,'#5ecbff',12,3.5);
+      SFX.explosion(0.9);
+      solarEnd(false, 'Collided with an obstacle.');
+      return;
+    }
+  }
+
+  solarTimeLeft--;
+  if(solarTimeLeft<=0){ solarEnd(true); return; }
+  if(solarPower<=0){ solarEnd(false); return; }
+}
+
+// Same as updatePlayer()'s movement block, but W/S only — A/D is reserved
+// for panel aim in this mode instead of horizontal movement.
+let solarFireKeyPrev = false;
+
+function updatePlayerSolarMove(){
+  const gp = pollGamepad();
+  let my=0;
+  if(keys['w']||keys['arrowup']) my-=1;
+  if(keys['s']||keys['arrowdown']) my+=1;
+  if(gp) my += gp.my;
+  my += touchMove.y;
+  my = clamp(my,-1,1);
+  player.y += my*player.speed;
+  player.y = clamp(player.y, 90, H-20);
+  if(player.fireCd>0) player.fireCd--;
+
+  // Tap-to-fire only in this mode — no holding down for autofire like the
+  // normal mode. Each press fires once; has to be pressed again for another.
+  const fireInput = keys['e'] || keys[' '] || (gp && gp.xBtn);
+  if(fireInput && !solarFireKeyPrev) tryFireGun();
+  solarFireKeyPrev = fireInput;
+}
+
+function updateHudSolar(){
+  const bar = document.getElementById('solarPowerBar');
+  if(bar) bar.style.width = clamp(solarPower,0,100)+'%';
+  const t = Math.max(0, Math.ceil(solarTimeLeft/60));
+  const tEl = document.getElementById('solarTimeLeft');
+  if(tEl) tEl.textContent = Math.floor(t/60)+':'+String(t%60).padStart(2,'0');
+}
+
+function drawSolarExtras(){
+  // sun
+  const grad = ctx.createRadialGradient(SOLAR_SUN.x,SOLAR_SUN.y,4, SOLAR_SUN.x,SOLAR_SUN.y,40);
+  grad.addColorStop(0,'#fff8d8');
+  grad.addColorStop(0.4,'#ffd23d');
+  grad.addColorStop(1,'rgba(255,178,60,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(SOLAR_SUN.x,SOLAR_SUN.y,40,0,Math.PI*2); ctx.fill();
+
+  // obstacles
+  ctx.fillStyle = '#3a2a1a';
+  ctx.strokeStyle = '#6a4a2a';
+  ctx.lineWidth = 2;
+  for(const o of solarObstacles){
+    ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+
+  // panel aim line from ship
+  const lx = player.x + Math.cos(solarPanelAngle)*40;
+  const ly = player.y + Math.sin(solarPanelAngle)*40;
+  ctx.strokeStyle = solarPower>=100 ? '#0f8' : '#ffd23d';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(player.x,player.y); ctx.lineTo(lx,ly); ctx.stroke();
+}
+
+function solarEnd(won, loseReason){
+  running = false;
+  gameMode = 'normal';
+  SFX.gameOver();
+  MUSIC.setIntensity(1);
+  MUSIC.setScene('menu');
+  setMobileControlsVisible(false);
+  document.getElementById('solarHud').classList.add('hidden');
+  const center = document.getElementById('center');
+  center.classList.remove('hidden');
+
+  let rewardHtml = '';
+  if(won){
+    const payout = 20;
+    addCash(payout);
+    rewardHtml = `<div style="color:#0f8;font-size:13px;margin-top:6px;">🔆 Solar array held steady — +💵${payout}</div>`;
+  }
+
+  center.innerHTML = `
+    <h1 style="${won ? 'color:#ffd23d;text-shadow:0 0 12px #ffb347;' : 'color:#f55;text-shadow:0 0 12px #f00;'}">${won ? 'POWER HELD' : 'SIGNAL LOST'}</h1>
+    <p>${won ? 'You kept the array powered for the full 2 minutes.' : (loseReason || 'The panel lost power completely.')}</p>
+    ${rewardHtml}
+    <button id="solarRetryBtn">${won ? 'RUN AGAIN' : 'RETRY'}</button>
+    <button id="solarMenuBtn">MENU</button>
+  `;
+  document.getElementById('solarRetryBtn').onclick = () => { SFX.uiClick(); resetSolarGame(); };
+  document.getElementById('solarMenuBtn').onclick = () => {
+    SFX.uiClick();
+    center.innerHTML = START_SCREEN_HTML;
+    wireStartScreen();
+  };
+}
+
+async function resetSolarGame(){
+  const banState = getBanState();
+  if(banState.banned){ showCheatOverlay(0); return; }
+  await ensureUsername();
+  currentDifficulty = getDifficultyDef(getDifficultyPref());
+  MUSIC.setIntensity(currentDifficulty.musicIntensity);
+  MUSIC.setScene('game');
+  gameMode = 'solar';
+  solarPower = 100; solarTimeLeft = SOLAR_DURATION_TICKS;
+  solarPanelAngle = -Math.PI/2; solarObstacles = []; solarObstacleSpawnCd = 60; solarFireKeyPrev = false;
+  player.maxHp = Math.round(PLAYER_BASE_HP * (1 + getUpgradeBonus('upg_hp') + getPerkBonus('hp')));
+  player.speed = PLAYER_BASE_SPEED * (1 + getUpgradeBonus('upg_speed') + getPerkBonus('speed'));
+  player.hp = player.maxHp; player.x = W/2; player.y = H-90;
+  player.shieldT = 0; player.rapidFireT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
+  bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[]; gasClouds=[];
+  document.getElementById('center').classList.add('hidden');
+  document.getElementById('solarHud').classList.remove('hidden');
+  setMobileControlsVisible(true);
+  updateHudSolar();
+  running = true;
+  tickAccumulator = 0; lastFrameTime = 0;
+  requestAnimationFrame(loop);
+}
+
  
 let powerups = [];
 let allies = [];
@@ -4694,6 +4963,14 @@ function render(){
   }
   ctx.clearRect(-10,-10,W+20,H+20);
   drawStars();
+  if(gameMode === 'solar'){
+    drawSolarExtras();
+    drawBullets();
+    drawPlayer();
+    drawParticles();
+    ctx.restore();
+    return;
+  }
   drawFlares();
   drawBombs();
   drawGasClouds();
@@ -4880,6 +5157,8 @@ function tick(){
   frame++;
   if(frame % 600 === 0) syncCurrencyToServer(); // stay "live" during long runs too
  
+  if(gameMode === 'solar'){ tickSolar(); return; }
+ 
   if(dyingTimer>0){
     dyingTimer--;
     updateParticles();
@@ -4992,6 +5271,7 @@ async function resetGame(){
 }
  
 document.getElementById('startBtn').onclick = () => { SFX.uiClick(); resetGame(); };
+document.getElementById('solarModeBtn').onclick = () => { SFX.uiClick(); resetSolarGame(); };
 document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
 
 // ---------- Test-mode scene selector (Ctrl+Alt+C) ----------
@@ -5001,6 +5281,8 @@ document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSk
 function wireStartScreen(){
   const startBtn = document.getElementById('startBtn');
   if(startBtn) startBtn.onclick = () => { SFX.uiClick(); resetGame(); };
+  const solarBtn = document.getElementById('solarModeBtn');
+  if(solarBtn) solarBtn.onclick = () => { SFX.uiClick(); resetSolarGame(); };
   const skinsBtn = document.getElementById('skinsBtnStart');
   if(skinsBtn) skinsBtn.onclick = () => { SFX.uiClick(); openSkinsScreen(); };
   const dailyBtnEl = document.getElementById('dailyBtn');
