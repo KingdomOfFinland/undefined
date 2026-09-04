@@ -78,7 +78,14 @@
   #lbList, #curLbList {
     list-style:none; width:100%; text-align:left;
     font-size:12px; max-height:220px; overflow-y:auto;
+    -webkit-overflow-scrolling:touch; /* smooth momentum scroll inside the absolutely-positioned corner box on iOS */
   }
+  /* Mobile browsers auto-hide overflow scrollbars by default, which makes a
+     cut-off list look broken/dead-ended instead of scrollable — explicitly
+     styling ::-webkit-scrollbar keeps a thin bar visible on mobile Chrome/Safari. */
+  #lbList::-webkit-scrollbar, #curLbList::-webkit-scrollbar { width:6px; }
+  #lbList::-webkit-scrollbar-track, #curLbList::-webkit-scrollbar-track { background:rgba(0,20,30,0.4); }
+  #lbList::-webkit-scrollbar-thumb, #curLbList::-webkit-scrollbar-thumb { background:#0af; border-radius:3px; }
   #lbList li, #curLbList li {
     display:flex; justify-content:space-between; padding:4px 6px;
     border-bottom:1px solid #123; gap:8px;
@@ -1596,6 +1603,7 @@ function openAccountModal(){
       const result = await fn(nameIn, passIn);
       if(result.ok){
         setUsername(nameIn);
+        startDonationWatch(); // re-attach now — don't rely on uf-authchanged race-ordering vs the setUsername above
         SFX.powerupPickup();
         statusEl.style.color = '#0f8';
         statusEl.textContent = kind === 'login' ? 'Logged in!' : 'Account secured!';
@@ -6424,6 +6432,7 @@ function openSkinsScreen(){
       </span>
       <button id="convertNuggetsBtn" style="font-size:11px; padding:4px 8px;">CONVERT 🪙 → 🐔 x2</button>
       <button id="donateBtn" style="font-size:11px; padding:4px 8px;">💌 DONATE</button>
+      <button id="checkGiftsBtn" style="font-size:11px; padding:4px 8px;">🎁 Check for gifts</button>
     </div>
     <div class="skinTabs" id="skinTabs"></div>
     <div id="skinsGrid"></div>
@@ -6441,6 +6450,7 @@ function openSkinsScreen(){
     syncCurrencyToServer();
   }
   renderCurrency();
+  if(currentUser) startDonationWatch(); // cheap + idempotent — self-heals if it ever desynced from the current callsign
   overlay.querySelector('#convertBtn').onclick = () => {
     if(convertCoinsToCash()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
     renderCurrency();
@@ -6463,6 +6473,26 @@ function openSkinsScreen(){
   overlay.querySelector('#donateBtn').onclick = () => {
     SFX.uiClick();
     openDonateScreen(renderCurrency);
+  };
+  overlay.querySelector('#checkGiftsBtn').onclick = async () => {
+    const name = getUsername();
+    if(!name){ SFX.shieldBlock(); return; }
+    if(!currentUser){
+      const user = await openAccountModal();
+      if(!user) return;
+    }
+    if(!window.__claimDonations) return;
+    const btn = overlay.querySelector('#checkGiftsBtn');
+    btn.disabled = true; const oldText = btn.textContent; btn.textContent = 'Checking...';
+    const gift = await window.__claimDonations(getUsername());
+    btn.disabled = false; btn.textContent = oldText;
+    if(gift.coins || gift.cash || gift.nuggets){
+      applyDonationGift(gift);
+      renderCurrency();
+    } else {
+      SFX.shieldBlock();
+      alert('No pending gifts right now.');
+    }
   };
  
   // Builds one skin card — used both by the normal per-category tabs and by
