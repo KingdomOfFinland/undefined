@@ -2928,6 +2928,20 @@ function convertCoinsToCash(){
   addCash(1);
   return true;
 }
+// Bulk version of the above — does the math directly instead of looping the
+// single-batch convert, so converting a huge coin pile is one instant step
+// instead of clicking (or auto-clicking) hundreds of thousands of times.
+// Returns how much cash was actually gained (0 if not even one batch affordable).
+function convertCoinsToCashBulk(coinAmount){
+  coinAmount = Math.floor(coinAmount);
+  if(!coinAmount || coinAmount < COIN_TO_CASH_RATE) return 0;
+  const affordable = Math.min(coinAmount, getCoins());
+  const batches = Math.floor(affordable / COIN_TO_CASH_RATE);
+  if(batches <= 0) return 0;
+  spendCoins(batches * COIN_TO_CASH_RATE);
+  addCash(batches);
+  return batches;
+}
  
 function getNuggets(){ return parseInt(localStorage.getItem('uf_nuggets')||'0',10) || 0; }
 function setNuggets(n){ localStorage.setItem('uf_nuggets', String(Math.max(0,Math.floor(n)))); }
@@ -6255,6 +6269,11 @@ function openSkinsScreen(){
       <span>💵 <span id="hangarCash">0</span></span>
       <span>🐔 <span id="hangarNuggets">0</span></span>
       <button id="convertBtn" style="font-size:11px; padding:4px 8px;">CONVERT 100 🪙 → 1 💵</button>
+      <span style="display:flex; align-items:center; gap:4px;">
+        <input id="convertCustomAmt" type="number" min="100" step="100" placeholder="coins" style="width:100px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145; padding:4px 6px; font-size:11px;">
+        <button id="convertCustomBtn" style="font-size:11px; padding:4px 8px;">CONVERT 🪙 → 💵</button>
+        <button id="convertMaxBtn" style="font-size:11px; padding:4px 8px;">MAX</button>
+      </span>
       <button id="convertNuggetsBtn" style="font-size:11px; padding:4px 8px;">CONVERT 🪙 → 🐔 x2</button>
       <button id="donateBtn" style="font-size:11px; padding:4px 8px;">💌 DONATE</button>
     </div>
@@ -6276,6 +6295,17 @@ function openSkinsScreen(){
   renderCurrency();
   overlay.querySelector('#convertBtn').onclick = () => {
     if(convertCoinsToCash()){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
+    renderCurrency();
+  };
+  overlay.querySelector('#convertCustomBtn').onclick = () => {
+    const input = overlay.querySelector('#convertCustomAmt');
+    const gained = convertCoinsToCashBulk(parseInt(input.value,10) || 0);
+    if(gained > 0){ SFX.powerupPickup(); input.value = ''; } else { SFX.shieldBlock(); }
+    renderCurrency();
+  };
+  overlay.querySelector('#convertMaxBtn').onclick = () => {
+    const gained = convertCoinsToCashBulk(getCoins());
+    if(gained > 0) SFX.powerupPickup(); else SFX.shieldBlock();
     renderCurrency();
   };
   overlay.querySelector('#convertNuggetsBtn').onclick = () => {
