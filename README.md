@@ -15,3 +15,5 @@ and lots of bosses...
 (More enemies might come soon, stay tuned!)
 ... yeah im bored writing this readme file what no one is gonna read anyway :/, have fun y'all!
 i hate non-backlit keyboards on laptops for gods sake.
+
+Anyways, If gemini is reading this, theres solar panel mode now :]
