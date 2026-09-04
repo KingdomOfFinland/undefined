@@ -898,13 +898,10 @@
       Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
     </p>
-    <button id="startBtn">LAUNCH</button>
-    <button id="solarModeBtn">☀ SOLAR PANEL MODE</button>
+    <button id="playBtn">▶ PLAY</button>
     <button id="skinsBtnStart">SKINS</button>
     <button id="dailyBtn">🎁 DAILY</button>
-    <button id="touchToggleBtn">📱 Touch Controls: AUTO</button>
-    <button id="btnSizeBtn">🔘 Button Size: NORMAL</button>
-    <button id="difficultyBtn">⚔ Difficulty: NORMAL</button>
+    <button id="settingsBtn">⚙ SETTINGS</button>
     <div id="authBar">
       <span id="authStatus" class="signedout"></span>
       <button id="accountBtn">🔐 Account</button>
@@ -947,13 +944,27 @@ const START_SCREEN_HTML = document.getElementById('center').innerHTML;
 // world onto a canvas backing-store sized for whatever screen it's on — a 1080p
 // TV gets a sharp 1080p-ish backing store, a 768p laptop stays native — instead
 // of stretching one fixed-size bitmap and going soft/blurry.
+// On top of that auto-fit, RES_SCALE_STEPS is a manual multiplier the player
+// can dial down in Settings if their device is struggling with fill-rate —
+// same backing-store idea, just deliberately rendered smaller then upscaled
+// by the browser, cheaper than full native resolution.
+const RES_SCALE_STEPS = [
+  { id:'50',  mult:0.5,  label:'50%' },
+  { id:'65',  mult:0.65, label:'65%' },
+  { id:'80',  mult:0.8,  label:'80%' },
+  { id:'100', mult:1,    label:'100% (Native)' }
+];
+function getResScalePref(){ return localStorage.getItem('uf_resscale') || '100'; }
+function setResScalePref(id){ localStorage.setItem('uf_resscale', id); }
+function getResScaleDef(id){ return RES_SCALE_STEPS.find(s => s.id===id) || RES_SCALE_STEPS[3]; }
 let renderScale = 1;
 function fitCanvasToScreen(){
   const availW = window.innerWidth;
   const availH = window.innerHeight;
   const cssScale = Math.max(0.1, Math.min(availW / W, availH / H));
   const dpr = window.devicePixelRatio || 1;
-  renderScale = cssScale * dpr;
+  const resMult = getResScaleDef(getResScalePref()).mult;
+  renderScale = cssScale * dpr * resMult;
   canvas.width = Math.round(W * renderScale);
   canvas.height = Math.round(H * renderScale);
   canvas.style.width = Math.round(W * cssScale) + 'px';
@@ -1340,6 +1351,11 @@ function updateBtnSizeBtnLabel(){
   if(!btn) return;
   btn.textContent = `🔘 Button Size: ${BTN_SCALE_STEPS[getBtnScaleIndex()].label}`;
 }
+function updateResScaleBtnLabel(){
+  const btn = document.getElementById('resScaleBtn');
+  if(!btn) return;
+  btn.textContent = `🖥 Resolution: ${getResScaleDef(getResScalePref()).label}`;
+}
 
 // Difficulty — locked in for the run at LAUNCH, not changeable mid-run.
 const DIFFICULTIES = [
@@ -1390,40 +1406,7 @@ function updateTouchToggleBtnLabel(){
 }
 document.addEventListener('DOMContentLoaded', () => {
   updateControlsInfoText();
-  updateTouchToggleBtnLabel();
   applyBtnScale();
-  updateBtnSizeBtnLabel();
-  const toggleBtn = document.getElementById('touchToggleBtn');
-  if(toggleBtn){
-    toggleBtn.onclick = () => {
-      SFX.uiClick();
-      const order = ['auto','on','off'];
-      const next = order[(order.indexOf(getTouchPref())+1) % order.length];
-      setTouchPref(next);
-      updateTouchToggleBtnLabel();
-      updateControlsInfoText();
-      updateRotateHint();
-    };
-  }
-  const btnSizeBtn = document.getElementById('btnSizeBtn');
-  if(btnSizeBtn){
-    btnSizeBtn.onclick = () => {
-      SFX.uiClick();
-      setBtnScaleIndex((getBtnScaleIndex()+1) % BTN_SCALE_STEPS.length);
-      applyBtnScale();
-      updateBtnSizeBtnLabel();
-    };
-  }
-  updateDifficultyBtnLabel();
-  const difficultyBtn = document.getElementById('difficultyBtn');
-  if(difficultyBtn){
-    difficultyBtn.onclick = () => {
-      SFX.uiClick();
-      const idx = DIFFICULTIES.findIndex(d => d.id === getDifficultyPref());
-      setDifficultyPref(DIFFICULTIES[(idx+1) % DIFFICULTIES.length].id);
-      updateDifficultyBtnLabel();
-    };
-  }
 });
 
 function updateRotateHint(){
@@ -1481,6 +1464,96 @@ function stopDonationWatch(){
 // (window.__currentUser) on success, or null if the player cancels. A
 // callsign with no password behind it yet is treated as "register" —
 // see __accountRegister for why that's safe against hijacking.
+// Shared by the settings modal every time it opens, since those buttons only
+// exist in the DOM while the modal is up (built fresh each time, not once at
+// page load like they used to be).
+function wireSettingsButtons(){
+  const toggleBtn = document.getElementById('touchToggleBtn');
+  if(toggleBtn){
+    toggleBtn.onclick = () => {
+      SFX.uiClick();
+      const order = ['auto','on','off'];
+      const next = order[(order.indexOf(getTouchPref())+1) % order.length];
+      setTouchPref(next);
+      updateTouchToggleBtnLabel();
+      updateControlsInfoText();
+      updateRotateHint();
+    };
+  }
+  updateTouchToggleBtnLabel();
+  const btnSizeBtn = document.getElementById('btnSizeBtn');
+  if(btnSizeBtn){
+    btnSizeBtn.onclick = () => {
+      SFX.uiClick();
+      setBtnScaleIndex((getBtnScaleIndex()+1) % BTN_SCALE_STEPS.length);
+      applyBtnScale();
+      updateBtnSizeBtnLabel();
+    };
+  }
+  updateBtnSizeBtnLabel();
+  const resScaleBtn = document.getElementById('resScaleBtn');
+  if(resScaleBtn){
+    resScaleBtn.onclick = () => {
+      SFX.uiClick();
+      const idx = RES_SCALE_STEPS.findIndex(s => s.id === getResScalePref());
+      setResScalePref(RES_SCALE_STEPS[(idx+1) % RES_SCALE_STEPS.length].id);
+      updateResScaleBtnLabel();
+      fitCanvasToScreen();
+    };
+  }
+  updateResScaleBtnLabel();
+  updateDifficultyBtnLabel();
+  const difficultyBtn = document.getElementById('difficultyBtn');
+  if(difficultyBtn){
+    difficultyBtn.onclick = () => {
+      SFX.uiClick();
+      const idx = DIFFICULTIES.findIndex(d => d.id === getDifficultyPref());
+      setDifficultyPref(DIFFICULTIES[(idx+1) % DIFFICULTIES.length].id);
+      updateDifficultyBtnLabel();
+    };
+  }
+}
+
+function openModeSelectModal(){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'modeSelectOverlay';
+  overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:80; padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
+      <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 14px;">SELECT MODE</h2>
+      <button id="startBtn" style="width:100%; margin-bottom:10px;">LAUNCH</button>
+      <button id="solarModeBtn" style="width:100%; margin-bottom:14px;">☀ SOLAR PANEL MODE</button>
+      <button id="modeCancelBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CANCEL</button>
+    </div>
+  `;
+  wrap.appendChild(overlay);
+  function close(){ wrap.removeChild(overlay); }
+  document.getElementById('startBtn').onclick = () => { SFX.uiClick(); close(); resetGame(); };
+  document.getElementById('solarModeBtn').onclick = () => { SFX.uiClick(); close(); resetSolarGame(); };
+  document.getElementById('modeCancelBtn').onclick = () => { SFX.uiClick(); close(); };
+}
+
+function openSettingsModal(){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'settingsOverlay';
+  overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:80; padding:16px;';
+  overlay.innerHTML = `
+    <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
+      <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 14px;">SETTINGS</h2>
+      <button id="touchToggleBtn" style="width:100%; margin-bottom:10px;">📱 Touch Controls: AUTO</button>
+      <button id="btnSizeBtn" style="width:100%; margin-bottom:10px;">🔘 Button Size: NORMAL</button>
+      <button id="resScaleBtn" style="width:100%; margin-bottom:10px;">🖥 Resolution: 100%</button>
+      <button id="difficultyBtn" style="width:100%; margin-bottom:14px;">⚔ Difficulty: NORMAL</button>
+      <button id="settingsCloseBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CLOSE</button>
+    </div>
+  `;
+  wrap.appendChild(overlay);
+  wireSettingsButtons();
+  document.getElementById('settingsCloseBtn').onclick = () => { SFX.uiClick(); wrap.removeChild(overlay); };
+}
+
 function openAccountModal(){
   return new Promise((resolve) => {
     const wrap = document.getElementById('wrap');
@@ -5271,19 +5344,17 @@ async function resetGame(){
   requestAnimationFrame(loop);
 }
  
-document.getElementById('startBtn').onclick = () => { SFX.uiClick(); resetGame(); };
-document.getElementById('solarModeBtn').onclick = () => { SFX.uiClick(); resetSolarGame(); };
+document.getElementById('playBtn').onclick = () => { SFX.uiClick(); openModeSelectModal(); };
 document.getElementById('skinsBtnStart').onclick = () => { SFX.uiClick(); openSkinsScreen(); };
+document.getElementById('settingsBtn').onclick = () => { SFX.uiClick(); openSettingsModal(); };
 
 // ---------- Test-mode scene selector (Ctrl+Alt+C) ----------
 // Re-wires the start screen after its markup gets restored from a preview
 // jump. Duplicates the one-off handlers set up above/below rather than
 // touching those, so normal startup flow stays untouched.
 function wireStartScreen(){
-  const startBtn = document.getElementById('startBtn');
-  if(startBtn) startBtn.onclick = () => { SFX.uiClick(); resetGame(); };
-  const solarBtn = document.getElementById('solarModeBtn');
-  if(solarBtn) solarBtn.onclick = () => { SFX.uiClick(); resetSolarGame(); };
+  const playBtn = document.getElementById('playBtn');
+  if(playBtn) playBtn.onclick = () => { SFX.uiClick(); openModeSelectModal(); };
   const skinsBtn = document.getElementById('skinsBtnStart');
   if(skinsBtn) skinsBtn.onclick = () => { SFX.uiClick(); openSkinsScreen(); };
   const dailyBtnEl = document.getElementById('dailyBtn');
@@ -5297,39 +5368,8 @@ function wireStartScreen(){
     };
   }
   updateDailyBtnState();
-  const toggleBtn = document.getElementById('touchToggleBtn');
-  if(toggleBtn){
-    toggleBtn.onclick = () => {
-      SFX.uiClick();
-      const order = ['auto','on','off'];
-      const next = order[(order.indexOf(getTouchPref())+1) % order.length];
-      setTouchPref(next);
-      updateTouchToggleBtnLabel();
-      updateControlsInfoText();
-      updateRotateHint();
-    };
-  }
-  updateTouchToggleBtnLabel();
-  const btnSizeBtn = document.getElementById('btnSizeBtn');
-  if(btnSizeBtn){
-    btnSizeBtn.onclick = () => {
-      SFX.uiClick();
-      setBtnScaleIndex((getBtnScaleIndex()+1) % BTN_SCALE_STEPS.length);
-      applyBtnScale();
-      updateBtnSizeBtnLabel();
-    };
-  }
-  updateBtnSizeBtnLabel();
-  updateDifficultyBtnLabel();
-  const difficultyBtn = document.getElementById('difficultyBtn');
-  if(difficultyBtn){
-    difficultyBtn.onclick = () => {
-      SFX.uiClick();
-      const idx = DIFFICULTIES.findIndex(d => d.id === getDifficultyPref());
-      setDifficultyPref(DIFFICULTIES[(idx+1) % DIFFICULTIES.length].id);
-      updateDifficultyBtnLabel();
-    };
-  }
+  const settingsBtn = document.getElementById('settingsBtn');
+  if(settingsBtn) settingsBtn.onclick = () => { SFX.uiClick(); openSettingsModal(); };
   updateControlsInfoText();
   wireAuthBar();
 }
