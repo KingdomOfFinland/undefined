@@ -335,6 +335,7 @@
   window.__adminSignIn = async function(){
     try{
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' }); // always show the picker — otherwise Google silently reuses whichever account was used last, which may not be the admin one
       const result = await signInWithPopup(auth, provider);
       console.log('%cSigned in as', 'color:#0f8;', result.user.email);
       console.log('%cYour UID:', 'color:#0f8;font-weight:bold;', result.user.uid);
