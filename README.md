@@ -16,4 +16,4 @@ and lots of bosses...
 ... yeah im bored writing this readme file what no one is gonna read anyway :/, have fun y'all!
 i hate non-backlit keyboards on laptops for gods sake.
 
-Anyways, If gemini is reading this, theres solar panel mode now :]
+# !!! GO TO REPO DESCRIPTION AND CLICK THE FANDOM LINK FOR MORE DETAILS !!!
