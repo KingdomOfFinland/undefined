@@ -716,16 +716,22 @@
 
       const itemRef = ref(db, 'limitedItems/' + itemId);
       let finalItem = null;
+      let localAbortReason = null; // distinguishes a genuine local abort (sold out/expired) from the server rejecting the commit for some other reason (auth state, rule mismatch, etc.) — those two used to get reported identically as "soldout", which is misleading
       const result = await runTransaction(itemRef, (item) => {
-        if(!item) return; // abort — no such item
-        if(item.remainingStock <= 0) return; // abort — sold out
-        if(item.expiresAt && Date.now() > item.expiresAt) return; // abort — expired
+        if(!item){ localAbortReason = 'notfound'; return; }
+        if(item.remainingStock <= 0){ localAbortReason = 'soldout'; return; }
+        if(item.expiresAt && Date.now() > item.expiresAt){ localAbortReason = 'expired'; return; }
         finalItem = { ...item, remainingStock: item.remainingStock - 1 };
         return finalItem; // must be the FULL object — the rule requires
                            // name/price/totalStock/remainingStock/expiresAt
                            // all present on every write to this path
       });
-      if(!result.committed || !finalItem) return { ok:false, reason:'soldout' };
+      if(!result.committed || !finalItem){
+        // If we never set a local abort reason, the LOCAL check passed (item
+        // had stock and wasn't expired) but the server still refused the
+        // commit — almost always an auth-state problem, not real scarcity.
+        return { ok:false, reason: localAbortReason || 'rejected' };
+      }
 
       const claimedCount = finalItem.totalStock - finalItem.remainingStock;
       const serial = String(claimedCount).padStart(4, '0') + '/' + finalItem.totalStock;
@@ -7355,7 +7361,12 @@ function openSkinsScreen(){
             if(!result.ok){
               SFX.shieldBlock();
               req.style.color = '#f66';
-              req.textContent = result.reason === 'soldout' ? 'SOLD OUT' : result.reason === 'expired' ? 'EXPIRED' : result.reason === 'already' ? 'ALREADY CLAIMED' : result.reason === 'notsignedin' ? 'SIGN IN TO CLAIM' : 'CLAIM FAILED';
+              req.textContent = result.reason === 'soldout' ? 'SOLD OUT'
+                : result.reason === 'expired' ? 'EXPIRED'
+                : result.reason === 'already' ? 'ALREADY CLAIMED'
+                : result.reason === 'notsignedin' ? 'SIGN IN TO CLAIM'
+                : result.reason === 'rejected' ? 'TRY AGAIN — sign-in hiccup'
+                : 'CLAIM FAILED';
               if(result.reason === 'soldout' || result.reason === 'expired'){
                 item.remainingStock = 0; // reflect locally without a re-fetch
               }
