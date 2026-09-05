@@ -1523,6 +1523,38 @@ function wireSettingsButtons(){
       updateDifficultyBtnLabel();
     };
   }
+  updateCustomShipStatus();
+  const templateBtn = document.getElementById('customShipTemplateBtn');
+  if(templateBtn) templateBtn.onclick = () => { SFX.uiClick(); downloadShipTemplate(); };
+  const uploadBtn = document.getElementById('customShipUploadBtn');
+  const fileInput = document.getElementById('customShipFileInput');
+  if(uploadBtn && fileInput){
+    uploadBtn.onclick = () => { SFX.uiClick(); fileInput.click(); };
+    fileInput.onchange = () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      if(!file) return;
+      setCustomShipFromFile(file, (ok, err) => {
+        if(ok){ SFX.powerupPickup(); } else { SFX.shieldBlock(); }
+        updateCustomShipStatus(err);
+      });
+    };
+  }
+  const resetBtn = document.getElementById('customShipResetBtn');
+  if(resetBtn){
+    resetBtn.onclick = () => {
+      SFX.uiClick();
+      clearCustomShipImage();
+      updateCustomShipStatus();
+    };
+  }
+}
+function updateCustomShipStatus(errorMsg){
+  const el = document.getElementById('customShipStatus');
+  if(!el) return;
+  if(errorMsg){ el.style.color = '#f88'; el.textContent = errorMsg; return; }
+  el.style.color = getCustomShipDataUrl() ? '#5cff8a' : '#8cf';
+  el.textContent = getCustomShipDataUrl() ? 'Custom image active (overrides equipped ship skin).' : 'Using your equipped ship skin.';
 }
 
 function openModeSelectModal(){
@@ -1558,7 +1590,17 @@ function openSettingsModal(){
       <button id="touchToggleBtn" style="width:100%; margin-bottom:10px;">📱 Touch Controls: AUTO</button>
       <button id="btnSizeBtn" style="width:100%; margin-bottom:10px;">🔘 Button Size: NORMAL</button>
       <button id="resScaleBtn" style="width:100%; margin-bottom:10px;">🖥 Resolution: 100%</button>
-      <button id="difficultyBtn" style="width:100%; margin-bottom:14px;">⚔ Difficulty: NORMAL</button>
+      <button id="difficultyBtn" style="width:100%; margin-bottom:10px;">⚔ Difficulty: NORMAL</button>
+      <div style="border-top:1px solid #145; margin:4px 0 10px; padding-top:10px;">
+        <div style="font-size:10px; color:#8cf; margin-bottom:6px;">🖼 Custom ship image — personal only, stays on this device</div>
+        <div id="customShipStatus" style="font-size:10px; color:#5cff8a; margin-bottom:6px;"></div>
+        <div style="display:flex; gap:6px;">
+          <button id="customShipTemplateBtn" style="flex:1; font-size:10px; padding:5px 4px;">TEMPLATE</button>
+          <button id="customShipUploadBtn" style="flex:1; font-size:10px; padding:5px 4px;">UPLOAD</button>
+          <button id="customShipResetBtn" style="flex:1; font-size:10px; padding:5px 4px;">RESET</button>
+        </div>
+        <input id="customShipFileInput" type="file" accept="image/*" style="display:none;">
+      </div>
       <button id="settingsCloseBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CLOSE</button>
     </div>
   `;
@@ -3091,6 +3133,105 @@ function setEquippedSkin(category, id){
 function getSkinById(list, id){
   return list.find(s => s.id === id) || list[0];
 }
+
+// ---------- Custom ship image (personal-only, local device) ----------
+// Never leaves the player's own browser — no upload, no server, no other
+// player will ever see it. A data URL lives in localStorage; we keep a
+// loaded Image element cached alongside so drawPlayer() never has to wait
+// on a decode mid-frame.
+const CUSTOM_SHIP_BOX = 44; // matches the rough bounding box every built-in ship skin draws within
+let customShipImgEl = null;
+function getCustomShipDataUrl(){ return localStorage.getItem('uf_customShipImg') || null; }
+function loadCustomShipImage(){
+  const url = getCustomShipDataUrl();
+  if(!url){ customShipImgEl = null; return; }
+  const img = new Image();
+  img.onload = () => { customShipImgEl = img; };
+  img.onerror = () => { customShipImgEl = null; };
+  img.src = url;
+}
+loadCustomShipImage(); // pick up any image saved from a previous session
+
+function setCustomShipFromFile(file, onDone){
+  if(!file || !file.type.startsWith('image/')){ onDone(false, 'Not an image file.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // Resize/fit onto a fixed square canvas so a huge phone photo doesn't
+      // blow up localStorage — 128x128 is plenty for how small the ship
+      // renders on screen, and keeps every upload roughly the same size.
+      const size = 128;
+      const off = document.createElement('canvas');
+      off.width = size; off.height = size;
+      const octx = off.getContext('2d');
+      const scale = Math.min(size/img.naturalWidth, size/img.naturalHeight);
+      const dw = img.naturalWidth*scale, dh = img.naturalHeight*scale;
+      octx.drawImage(img, (size-dw)/2, (size-dh)/2, dw, dh);
+      const dataUrl = off.toDataURL('image/png');
+      try{
+        localStorage.setItem('uf_customShipImg', dataUrl);
+      } catch(e){
+        onDone(false, 'Image too large to save locally — try a smaller/simpler image.');
+        return;
+      }
+      loadCustomShipImage();
+      onDone(true);
+    };
+    img.onerror = () => onDone(false, 'Could not read that image.');
+    img.src = reader.result;
+  };
+  reader.onerror = () => onDone(false, 'Could not read that file.');
+  reader.readAsDataURL(file);
+}
+function clearCustomShipImage(){
+  localStorage.removeItem('uf_customShipImg');
+  customShipImgEl = null;
+}
+// Downloadable guide: a square canvas showing the bounding box, a "nose
+// points here" arrow, and the default ship's outline traced faintly for
+// alignment — entirely generated on the fly, no separate asset to ship.
+function downloadShipTemplate(){
+  const size = 512;
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const c = off.getContext('2d');
+  c.clearRect(0,0,size,size);
+  const cx = size/2, cy = size/2;
+  const boxScale = size / CUSTOM_SHIP_BOX * 0.82; // leave margin around the box
+  // dashed bounding box
+  c.strokeStyle = 'rgba(0,255,255,0.6)';
+  c.lineWidth = 3;
+  c.setLineDash([14,10]);
+  const boxPx = CUSTOM_SHIP_BOX*boxScale;
+  c.strokeRect(cx-boxPx/2, cy-boxPx/2, boxPx, boxPx);
+  c.setLineDash([]);
+  // faint default-ship silhouette for alignment reference
+  c.save();
+  c.translate(cx,cy);
+  c.scale(boxScale, boxScale);
+  c.globalAlpha = 0.25;
+  SHIP_SKINS[0].draw(c, false);
+  c.restore();
+  // nose direction arrow, above the box
+  c.strokeStyle = '#ffd23d'; c.fillStyle = '#ffd23d'; c.lineWidth = 4;
+  c.beginPath(); c.moveTo(cx, cy-boxPx/2-50); c.lineTo(cx, cy-boxPx/2-14); c.stroke();
+  c.beginPath(); c.moveTo(cx-10, cy-boxPx/2-24); c.lineTo(cx, cy-boxPx/2-8); c.lineTo(cx+10, cy-boxPx/2-24); c.closePath(); c.fill();
+  c.font = '20px monospace'; c.textAlign = 'center';
+  c.fillText('NOSE / FORWARD', cx, cy-boxPx/2-58);
+  c.fillStyle = 'rgba(200,230,255,0.8)';
+  c.fillText('Fit your art inside the dashed box, transparent background,', cx, size-40);
+  c.fillText('then upload it back in Settings.', cx, size-16);
+
+  off.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'undefined-fighter-ship-template.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+}
+
 const player = {
   x: W/2, y: H-90, vx:0, vy:0, angle:-Math.PI/2,
   w: 34, h: 30, speed: 5.8,
@@ -4918,9 +5059,16 @@ function drawPlayer(){
   }
   
   const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']||(Math.abs(touchMove.x)>0.05||Math.abs(touchMove.y)>0.05);
-  const equipped = getEquippedSkins();
-  const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
-  shipSkin.draw(ctx, thrusting);
+  if(customShipImgEl){
+    const scale = Math.min(CUSTOM_SHIP_BOX/customShipImgEl.naturalWidth, CUSTOM_SHIP_BOX/customShipImgEl.naturalHeight);
+    const dw = customShipImgEl.naturalWidth*scale, dh = customShipImgEl.naturalHeight*scale;
+    ctx.drawImage(customShipImgEl, -dw/2, -dh/2, dw, dh);
+    drawThruster(ctx, thrusting);
+  } else {
+    const equipped = getEquippedSkins();
+    const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
+    shipSkin.draw(ctx, thrusting);
+  }
   if(player.shieldT>0){
     const pulse = 1 + Math.sin(frame*0.2)*0.06;
     ctx.strokeStyle = 'rgba(94,203,255,0.75)';
