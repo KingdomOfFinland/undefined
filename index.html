@@ -2309,6 +2309,31 @@ const SHIP_SKINS = [
     ctx.fillRect(-8,-2,6,2); ctx.fillRect(-6,-4,2,6);
     ctx.fillStyle='#e8e8ff'; ctx.fillRect(-18,2,10,4); ctx.fillRect(8,2,10,4);
     drawThruster(ctx,th,'rgba(140,200,255,0.85)');
+  }},
+  { id:'solarvanguard', name:'Solar Vanguard', unlock:{type:'special'}, exclusive:true,
+    unlockDesc:"Claimed from a limited drop — gold hull, flare-forged wings.", draw(ctx,th){
+    ctx.fillStyle='#2a1a05'; ctx.strokeStyle='#ffd23d'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-22);
+    ctx.lineTo(3,-8);
+    ctx.lineTo(16,6); ctx.lineTo(16,10); ctx.lineTo(5,7);
+    ctx.lineTo(5,14);
+    ctx.lineTo(9,19); ctx.lineTo(5,19); ctx.lineTo(2,14);
+    ctx.lineTo(-2,14); ctx.lineTo(-5,19); ctx.lineTo(-9,19);
+    ctx.lineTo(-5,14);
+    ctx.lineTo(-5,7); ctx.lineTo(-16,10); ctx.lineTo(-16,6);
+    ctx.lineTo(-3,-8);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // sun-flare canopy
+    ctx.save();
+    ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 8;
+    ctx.fillStyle='#ffb347';
+    ctx.beginPath(); ctx.ellipse(0,-6,2,6,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // gold wing accents with a warm flare stripe
+    ctx.fillStyle='#ffd23d'; ctx.fillRect(-15,6,8,3); ctx.fillRect(7,6,8,3);
+    ctx.fillStyle='#ff8a3d'; ctx.fillRect(-15,9,8,1.5); ctx.fillRect(7,9,8,1.5);
+    drawThruster(ctx,th,'rgba(255,178,60,0.9)');
   }}
 ];
  
@@ -6114,6 +6139,17 @@ let navPrev = { up:false, down:false, left:false, right:false, x:false };
 let navFocusIndex = 0;
  
 function getNavTargets(){
+  // Any of these modal overlays sit in #wrap, outside #center, so they need
+  // their own check here — otherwise gamepad nav goes dead the moment one
+  // opens (mode select, settings, account, donate), same as it already did
+  // for the skins overlay below.
+  for(const id of ['modeSelectOverlay','settingsOverlay','accountOverlay','donateOverlay']){
+    const overlay = document.getElementById(id);
+    if(overlay){
+      const all = Array.from(overlay.querySelectorAll('button'));
+      return all.filter(el => window.getComputedStyle(el).display !== 'none' && !el.disabled);
+    }
+  }
   // if the skins overlay is open, navigate within it instead (it sits on top)
   const skinsOverlay = document.getElementById('skinsOverlay');
   if(skinsOverlay){
@@ -6152,7 +6188,9 @@ function navGamepadTick(){
  
   const center = document.getElementById('center');
   const skinsOverlay = document.getElementById('skinsOverlay');
-  const uiOpen = skinsOverlay || (center && !center.classList.contains('hidden'));
+  const anyModalOverlay = document.getElementById('modeSelectOverlay') || document.getElementById('settingsOverlay')
+    || document.getElementById('accountOverlay') || document.getElementById('donateOverlay');
+  const uiOpen = anyModalOverlay || skinsOverlay || (center && !center.classList.contains('hidden'));
   if(!uiOpen) return;
  
   const targets = getNavTargets();
@@ -7663,6 +7701,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 if(document.getElementById('center')){
   centerObserver.observe(document.getElementById('center'), { childList:true, subtree:true });
   applyDisplaySettings();
+}
+// Modals (mode select, settings, account, donate) are appended as direct
+// children of #wrap, a sibling of #center — the observer above never sees
+// those, so the focus highlight wouldn't show until the first d-pad press.
+// Watching #wrap's direct children (not subtree, since we only care about a
+// whole modal appearing/disappearing, not what's inside it) closes that gap.
+if(document.getElementById('wrap')){
+  centerObserver.observe(document.getElementById('wrap'), { childList:true });
 }
 
 // hey claude, just a reminder that, um... can you fix the resolution js file to fix mobile scaling and than you cam enter it on mobile, also the menu buttons, please dont stack them together
