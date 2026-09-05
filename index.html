@@ -706,22 +706,18 @@
   window.__claimLimitedItem = async function(uid, itemId){
     try{
       if(!uid) return { ok:false, reason:'notsignedin' };
-      console.log('[claim] starting', { uid, itemId }); // temporary diagnostic — remove once the mystery failure is found
 
       // Soft check first so a player who's clearly already claimed doesn't
       // spend a transaction round-trip on the stock node for nothing — the
       // real guarantee against a double-claim slipping through on a race is
       // just re-running this after any failed/retried claim attempt.
       const alreadySnap = await get(ref(db, 'players/' + uid + '/limitedInventory/' + itemId));
-      console.log('[claim] already-claimed check:', alreadySnap.exists());
       if(alreadySnap.exists()) return { ok:false, reason:'already' };
 
       const itemRef = ref(db, 'limitedItems/' + itemId);
       let finalItem = null;
       let localAbortReason = null; // distinguishes a genuine local abort (sold out/expired) from the server rejecting the commit for some other reason (auth state, rule mismatch, etc.) — those two used to get reported identically as "soldout", which is misleading
-      let sawItem = undefined; // temporary diagnostic — what the transaction callback actually received
       const result = await runTransaction(itemRef, (item) => {
-        sawItem = item;
         if(!item){ localAbortReason = 'notfound'; return; }
         if(item.remainingStock <= 0){ localAbortReason = 'soldout'; return; }
         if(item.expiresAt && Date.now() > item.expiresAt){ localAbortReason = 'expired'; return; }
@@ -729,8 +725,12 @@
         return finalItem; // must be the FULL object — the rule requires
                            // name/price/totalStock/remainingStock/expiresAt
                            // all present on every write to this path
-      });
-      console.log('[claim] transaction result:', { committed: result.committed, sawItem, localAbortReason, finalItem });
+      }, { applyLocally: false }); // skip the optimistic local-cache guess entirely —
+      // without this, a path with no active listener yet gets handed to the
+      // callback as null on the first pass, which we correctly treat as "no
+      // such item" and abort on — except the item DOES exist, we just hadn't
+      // synced it yet. applyLocally:false makes the callback wait for the
+      // real server value before running even once, so it never sees a false null.
       if(!result.committed || !finalItem){
         // If we never set a local abort reason, the LOCAL check passed (item
         // had stock and wasn't expired) but the server still refused the
