@@ -7468,7 +7468,12 @@ function openSkinsScreen(){
  
     const isEnemyCat = !!cat.enemyType;
  
-    cat.list.filter(s => !s.exclusive).forEach(skin => {
+    // Exclusive skins (Black Market / Limited drops) are hidden from the
+    // normal browse-and-unlock grid since there's no earn-path to show for
+    // them here — but once OWNED, they need to still appear so there's
+    // actually somewhere to equip them. Without the ownership check here,
+    // an exclusive skin becomes permanently unequippable the moment you get it.
+    cat.list.filter(s => !s.exclusive || getOwnedSkins().includes(s.id)).forEach(skin => {
       gridEl.appendChild(buildSkinCard(skin, activeCat, isEnemyCat, cat.enemyType, stats, equipped));
     });
   }
