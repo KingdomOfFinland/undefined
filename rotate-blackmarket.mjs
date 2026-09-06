@@ -22,7 +22,7 @@ const COUNTS = {
   abilities: 2,    // out of 4 total
   consumables: 2,  // out of 4 total
   exchanges: 2,    // out of 3 total
-  exclusives: 1,   // out of 4 total — kept rare on purpose
+  exclusives: 1,   // out of 5 total — kept rare on purpose
   skins: 6         // out of ~24 total
 };
 
@@ -44,7 +44,7 @@ const EXCHANGE_IDS = [
 // exclusive_<categoryKey>_<skinId> — these skins ONLY exist in the black market,
 // they're not in the normal Hangar tabs at all.
 const EXCLUSIVE_SKIN_IDS = [
-  'exclusive_ship_blackout', 'exclusive_bullet_contraband_bullet',
+  'exclusive_ship_blackout', 'exclusive_ship_wraithcircuit', 'exclusive_bullet_contraband_bullet',
   'exclusive_missile_contraband_missile', 'exclusive_flare_contraband_flare'
 ];
 // skin_<categoryKey>_<skinId> — regular currency-buyable skins that are also
@@ -86,6 +86,7 @@ const DISPLAY = {
   exchange_bulk_cash_to_coins:   { name: 'Bulk Cash Exchange',   price: 10,   type: 'exchange' },
   exchange_bulk_nuggets_to_cash: { name: 'Bulk Nugget Deal',     price: 1000, type: 'exchange' },
   exclusive_ship_blackout:               { name: 'Blackout Interceptor', price: 150, type: 'exclusive' },
+  exclusive_ship_wraithcircuit:          { name: 'Wraith Circuit',       price: 180, type: 'exclusive' },
   exclusive_bullet_contraband_bullet:    { name: 'Contraband Rounds',    price: 80,  type: 'exclusive' },
   exclusive_missile_contraband_missile:  { name: 'Contraband Seeker',    price: 100, type: 'exclusive' },
   exclusive_flare_contraband_flare:      { name: 'Contraband Flare',     price: 60,  type: 'exclusive' }
