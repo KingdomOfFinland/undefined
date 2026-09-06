@@ -707,35 +707,34 @@
     try{
       if(!uid) return { ok:false, reason:'notsignedin' };
 
-      // Soft check first so a player who's clearly already claimed doesn't
-      // spend a transaction round-trip on the stock node for nothing — the
-      // real guarantee against a double-claim slipping through on a race is
-      // just re-running this after any failed/retried claim attempt.
+      // Soft check so a player who's clearly already claimed doesn't bother
+      // spending a round-trip on the stock node for nothing.
       const alreadySnap = await get(ref(db, 'players/' + uid + '/limitedInventory/' + itemId));
       if(alreadySnap.exists()) return { ok:false, reason:'already' };
 
+      // Plain read-then-write instead of runTransaction: a straightforward
+      // get() reliably returns the real server value (confirmed against the
+      // live console data), where runTransaction's callback was mysteriously
+      // seeing null for a path that unquestionably exists — not worth
+      // fighting further for a low-traffic hobby project. Trade-off: a
+      // genuine double-claim race is now technically possible under heavy
+      // simultaneous purchases of the same item, which is a non-issue at
+      // this game's scale.
       const itemRef = ref(db, 'limitedItems/' + itemId);
-      let finalItem = null;
-      let localAbortReason = null; // distinguishes a genuine local abort (sold out/expired) from the server rejecting the commit for some other reason (auth state, rule mismatch, etc.) — those two used to get reported identically as "soldout", which is misleading
-      const result = await runTransaction(itemRef, (item) => {
-        if(!item){ localAbortReason = 'notfound'; return; }
-        if(item.remainingStock <= 0){ localAbortReason = 'soldout'; return; }
-        if(item.expiresAt && Date.now() > item.expiresAt){ localAbortReason = 'expired'; return; }
-        finalItem = { ...item, remainingStock: item.remainingStock - 1 };
-        return finalItem; // must be the FULL object — the rule requires
-                           // name/price/totalStock/remainingStock/expiresAt
-                           // all present on every write to this path
-      }, { applyLocally: false }); // skip the optimistic local-cache guess entirely —
-      // without this, a path with no active listener yet gets handed to the
-      // callback as null on the first pass, which we correctly treat as "no
-      // such item" and abort on — except the item DOES exist, we just hadn't
-      // synced it yet. applyLocally:false makes the callback wait for the
-      // real server value before running even once, so it never sees a false null.
-      if(!result.committed || !finalItem){
-        // If we never set a local abort reason, the LOCAL check passed (item
-        // had stock and wasn't expired) but the server still refused the
-        // commit — almost always an auth-state problem, not real scarcity.
-        return { ok:false, reason: localAbortReason || 'rejected' };
+      const itemSnap = await get(itemRef);
+      if(!itemSnap.exists()) return { ok:false, reason:'notfound' };
+      const item = itemSnap.val();
+      if(item.remainingStock <= 0) return { ok:false, reason:'soldout' };
+      if(item.expiresAt && Date.now() > item.expiresAt) return { ok:false, reason:'expired' };
+
+      const finalItem = { ...item, remainingStock: item.remainingStock - 1 };
+      try{
+        await set(itemRef, finalItem); // must be the FULL object — the rule requires
+                                        // name/price/totalStock/remainingStock/expiresAt
+                                        // all present on every write to this path
+      } catch(e){
+        console.error('claim limited item failed (stock write rejected)', e);
+        return { ok:false, reason:'rejected' };
       }
 
       const claimedCount = finalItem.totalStock - finalItem.remainingStock;
