@@ -2345,6 +2345,48 @@ const SHIP_SKINS = [
     ctx.fillStyle='#ffd23d'; ctx.fillRect(-15,6,8,3); ctx.fillRect(7,6,8,3);
     ctx.fillStyle='#ff8a3d'; ctx.fillRect(-15,9,8,1.5); ctx.fillRect(7,9,8,1.5);
     drawThruster(ctx,th,'rgba(255,178,60,0.9)');
+  }},
+  { id:'wraithcircuit', name:'Wraith Circuit', unlock:{type:'nuggets', value:180}, exclusive:true,
+    unlockDesc:"Black Market exclusive — stealth hull laced with live circuitry.", draw(ctx,th){
+    ctx.fillStyle='#0a0a12'; ctx.strokeStyle='#b388ff'; ctx.lineWidth=1.4;
+    ctx.beginPath();
+    ctx.moveTo(0,-21); ctx.lineTo(4,-4); ctx.lineTo(17,7); ctx.lineTo(17,10); ctx.lineTo(4,5);
+    ctx.lineTo(4,17); ctx.lineTo(-4,17); ctx.lineTo(-4,5);
+    ctx.lineTo(-17,10); ctx.lineTo(-17,7); ctx.lineTo(-4,-4);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // glowing purple circuit lines traced across the hull
+    ctx.save();
+    ctx.shadowColor = '#b388ff'; ctx.shadowBlur = 6;
+    ctx.strokeStyle = 'rgba(179,136,255,0.9)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0,-14); ctx.lineTo(0,-2); ctx.lineTo(8,4); ctx.lineTo(8,9);
+    ctx.moveTo(0,-2); ctx.lineTo(-8,4); ctx.lineTo(-8,9);
+    ctx.stroke();
+    ctx.fillStyle = '#e8d9ff';
+    ctx.beginPath(); ctx.arc(0,-2,1.6,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(8,9,1.4,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-8,9,1.4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    drawThruster(ctx,th,'rgba(179,136,255,0.85)');
+  }},
+  { id:'terraguardian', name:'Terra Guardian', unlock:{type:'special'}, exclusive:true,
+    unlockDesc:"Claimed from a limited drop — Earth-toned hull, orbit-ring accents.", draw(ctx,th){
+    ctx.fillStyle='#0f2a1a'; ctx.strokeStyle='#4dd67a'; ctx.lineWidth=1.6;
+    ctx.beginPath();
+    ctx.moveTo(0,-21); ctx.lineTo(3,-6); ctx.lineTo(15,8); ctx.lineTo(15,11); ctx.lineTo(4,7);
+    ctx.lineTo(4,18); ctx.lineTo(-4,18); ctx.lineTo(-4,7);
+    ctx.lineTo(-15,11); ctx.lineTo(-15,8); ctx.lineTo(-3,-6);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // blue "ocean" canopy with a faint orbit-ring arc over the nose
+    ctx.fillStyle='#2f7dd6';
+    ctx.beginPath(); ctx.ellipse(0,-4,2,7,0,0,Math.PI*2); ctx.fill();
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,220,160,0.6)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0,-8,11,4,0,Math.PI*0.15,Math.PI*0.85); ctx.stroke();
+    ctx.restore();
+    // olive wing accents
+    ctx.fillStyle='#4dd67a'; ctx.fillRect(-14,7,7,3); ctx.fillRect(7,7,7,3);
+    drawThruster(ctx,th,'rgba(77,214,122,0.85)');
   }}
 ];
  
