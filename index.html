@@ -270,7 +270,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+  import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
  
   const firebaseConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
@@ -780,13 +780,12 @@
       const taken = await window.__isUsernameTaken(toName);
       if(!taken) return { ok:false, reason:'notfound' };
       const donRef = push(ref(db, 'donations/' + toKey));
-      const now = Date.now();
       await set(donRef, {
         from: (fromName || 'PILOT').slice(0,12),
         coins: Number(coins) || 0,
         cash: Number(cash) || 0,
         nuggets: Number(nuggets) || 0,
-        ts: now
+        ts: serverTimestamp() // server-assigned, avoids client clock skew tripping the `ts <= now` rule
       });
       return { ok:true };
     } catch(e){
