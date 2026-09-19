@@ -6397,6 +6397,24 @@ function getUsername(){
   return localStorage.getItem('uf_username') || '';
 }
 function setUsername(name){
+  // easter egg — the great math debate, always wins before eval
+  if(name.replace(/\s/g,'') === '8:2(2+2)'){
+    name = '1 rem 2';
+  } else {
+    // try evaluating as a math expression — only safe numeric results become the name
+    try {
+      const expr = name.replace(/[^0-9+\-*/().% ]/g, ''); // strip anything non-math
+      if(expr.trim() && expr.trim() !== name.trim()){
+        // expression had non-math chars stripped — don't eval, use original
+      } else if(expr.trim()){
+        const result = Function('"use strict"; return (' + expr + ')')();
+        if(typeof result === 'number' && isFinite(result)){
+          // round to 4 significant figures so you don't get 3.3333333333333335
+          name = parseFloat(result.toPrecision(4)).toString().slice(0,12);
+        }
+      }
+    } catch(e){ /* not a valid expression, use name as-is */ }
+  }
   localStorage.setItem('uf_username', name);
   if(currentUser) startDonationWatch();
 }
