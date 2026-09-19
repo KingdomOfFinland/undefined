@@ -693,19 +693,6 @@
       return {};
     }
   };
-  window.__fetchDailyShop = async function(){
-    try{
-      const snap = await get(ref(db, 'dailyShop'));
-      if(!snap.exists()) return null;
-      const data = snap.val();
-      // If the shop has expired (past its expiresAt), treat as missing
-      if(data.expiresAt && Date.now() > data.expiresAt) return null;
-      return data;
-    } catch(e){
-      console.error('fetch daily shop failed', e);
-      return null;
-    }
-  };
   window.__hasClaimedLimitedItem = async function(uid, itemId){
     try{
       if(!uid) return false;
@@ -6876,174 +6863,6 @@ function applyLimitedItemReward(item){
   return 'Claimed';
 }
  
-// ---------- Daily Shop ----------
-// Slots are written to Firebase at midnight by shop-rotate.mjs (GitHub Actions).
-// If Firebase is unavailable, falls back to client-side date-seeded generation
-// so the tab is never empty.
-
-const DAILY_RARITIES = [
-  { id:'silver',   label:'SILVER',   color:'#c0c0c0' },
-  { id:'gold',     label:'GOLD',     color:'#ffd23d' },
-  { id:'diamond',  label:'DIAMOND',  color:'#a0e8ff' },
-  { id:'obsidian', label:'OBSIDIAN', color:'#7c4dff' },
-  { id:'emerald',  label:'EMERALD',  color:'#00e676' },
-  { id:'lottery',  label:'LOTTERY',  color:'#ff6b6b' }
-];
-
-function seededRand(seed){
-  let s = seed;
-  return function(){
-    s = (s * 1664525 + 1013904223) & 0xffffffff;
-    return (s >>> 0) / 0xffffffff;
-  };
-}
-
-function getDailyShopSeed(){
-  const d = new Date();
-  return d.getFullYear() * 10000 + (d.getMonth()+1) * 100 + d.getDate();
-}
-
-function pickFromArray(arr, rng){ return arr[Math.floor(rng() * arr.length)]; }
-
-function buildFallbackDailyShop(){
-  const rng = seededRand(getDailyShopSeed());
-  const allSkins = [...SHIP_SKINS, ...BULLET_SKINS, ...MISSILE_SKINS, ...FLARE_SKINS];
-  const upgrades = UPGRADE_DEFS || [];
-  const abilities = ABILITY_DEFS || [];
-  const retiredLimiteds = allSkins.filter(s => s.exclusive);
-
-  function poolForRarity(rarityId){
-    switch(rarityId){
-      case 'silver':   return allSkins.filter(s => !s.exclusive && (!s.unlock || s.unlock.type==='coins'));
-      case 'gold':     return [...upgrades, ...abilities];
-      case 'diamond':  return allSkins.filter(s => !s.exclusive && s.unlock && s.unlock.type==='cash');
-      case 'obsidian': return allSkins.filter(s => !s.exclusive && s.unlock && s.unlock.type==='nuggets');
-      case 'emerald':  return [...allSkins.filter(s => !s.exclusive), ...upgrades];
-      default:         return [];
-    }
-  }
-
-  function discountPrice(item, rarityId){
-    const discounts = { silver:0.85, gold:0.80, diamond:0.75, obsidian:0.70, emerald:0.65 };
-    const d = discounts[rarityId] || 1;
-    if(item.cost) return { amount: Math.max(1, Math.round(item.cost * d)), currency: item.costType || 'coins' };
-    if(item.unlock){
-      if(item.unlock.type==='coins')   return { amount: Math.max(1, Math.round((item.unlock.value||500) * d)), currency:'coins'   };
-      if(item.unlock.type==='cash')    return { amount: Math.max(1, Math.round((item.unlock.value||5)   * d)), currency:'cash'    };
-      if(item.unlock.type==='nuggets') return { amount: Math.max(1, Math.round((item.unlock.value||50)  * d)), currency:'nuggets' };
-    }
-    return { amount: Math.max(1, Math.round(200 * d)), currency:'coins' };
-  }
-
-  const slots = [];
-  const distribution = [
-    {id:'silver',10},{id:'gold',7},{id:'diamond',4},{id:'obsidian',2},{id:'emerald',1}
-  ].flatMap(({id,n})=> Array(n).fill(id));
-
-  for(const rarityId of distribution){
-    const pool = poolForRarity(rarityId);
-    if(!pool.length) continue;
-    const item = pickFromArray(pool, rng);
-    const rarity = DAILY_RARITIES.find(r=>r.id===rarityId);
-    const p = discountPrice(item, rarityId);
-    slots.push({ id: item.id, name: item.name||item.statLabel||'?', desc: item.desc||item.unlockDesc||'',
-      type: item.cost ? 'ability' : 'skin', key: item.statLabel ? 'upgrade' : undefined,
-      price: p.amount, currency: p.currency, rarity: rarityId });
-  }
-
-  // Lottery slot
-  const directLimited = rng() < 0.49 && retiredLimiteds.length > 0;
-  if(directLimited){
-    const item = pickFromArray(retiredLimiteds, rng);
-    slots.push({ id:item.id, name:item.name, desc:item.unlockDesc||'', type:'skin', price:1, currency:'coins', rarity:'lottery', lotteryType:'direct_limited' });
-  } else {
-    const jackpot = rng() < 0.0000000054;
-    if(jackpot && retiredLimiteds.length > 0){
-      const item = pickFromArray(retiredLimiteds, rng);
-      slots.push({ id:item.id, name:item.name, desc:item.unlockDesc||'', type:'skin', price:1, currency:'coins', rarity:'lottery', lotteryType:'jackpot' });
-    } else {
-      const allRarityIds = ['silver','gold','diamond','obsidian','emerald'];
-      const rolledRarityId = pickFromArray(allRarityIds, rng);
-      const pool = poolForRarity(rolledRarityId);
-      if(pool.length){
-        const item = pickFromArray(pool, rng);
-        const p = discountPrice(item, rolledRarityId);
-        slots.push({ id:item.id, name:item.name||item.statLabel||'?', desc:item.desc||'', type:'skin', price:1, currency:'coins', rarity:'lottery', lotteryType:'roll', rolledRarity:rolledRarityId });
-      }
-    }
-  }
-  return slots;
-}
-
-async function fetchDailyShopSlots(){
-  try {
-    if(window.__fetchDailyShop){
-      const data = await window.__fetchDailyShop();
-      if(data && data.slots && data.slots.length) return { slots: data.slots, fromFirebase: true, expiresAt: data.expiresAt };
-    }
-  } catch(e){ /* fall through to fallback */ }
-  return { slots: buildFallbackDailyShop(), fromFirebase: false };
-}
-
-async function renderDailyShop(gridEl, renderCurrency){
-  gridEl.innerHTML = '<div style="text-align:center;color:#8cf;padding:20px;font-size:12px;">Loading daily shop...</div>';
-  const { slots, fromFirebase, expiresAt } = await fetchDailyShopSlots();
-
-  const now = new Date();
-  const midnight = expiresAt ? new Date(expiresAt) : new Date(now); if(!expiresAt){ midnight.setHours(24,0,0,0); }
-  const msLeft = midnight - now;
-  const hLeft = Math.floor(msLeft/3600000);
-  const mLeft = Math.floor((msLeft%3600000)/60000);
-
-  gridEl.innerHTML = `
-    <div style="text-align:center; color:#8cf; font-size:11px; margin-bottom:10px;">
-      🕐 Resets in ${hLeft}h ${mLeft}m — same shop for everyone today
-      ${!fromFirebase ? '<span style="color:#fa0;margin-left:8px;">(offline mode)</span>' : ''}
-    </div>
-    <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">
-      ${slots.map((slot, idx) => {
-        if(!slot) return '';
-        const r = DAILY_RARITIES.find(r=>r.id===slot.rarity) || DAILY_RARITIES[0];
-        const currencyIcon = slot.currency==='coins'?'🪙':slot.currency==='cash'?'💵':'🐔';
-        const priceStr = slot.rarity==='lottery' ? `1 🪙 (Lottery)` : `${slot.price} ${currencyIcon}`;
-        const rarityLabel = slot.lotteryType==='jackpot' ? '🎰 JACKPOT' : slot.lotteryType==='direct_limited' ? '🎰 LIMITED' : slot.lotteryType==='roll' ? `🎰 → ${(slot.rolledRarity||'').toUpperCase()}` : r.label;
-        return `<div class="dailySlot" data-idx="${idx}" style="
-          width:130px; min-height:110px; border:2px solid ${r.color};
-          border-radius:8px; padding:8px; cursor:pointer; background:#031117;
-          display:flex; flex-direction:column; gap:4px;
-          box-shadow:0 0 8px ${r.color}44;">
-          <div style="font-size:9px;font-weight:bold;color:${r.color};letter-spacing:1px;">${rarityLabel}</div>
-          <div style="font-size:11px;color:#cdeaff;font-weight:bold;">${slot.name||'???'}</div>
-          <div style="font-size:9px;color:#7ab;flex:1;">${(slot.desc||'').slice(0,60)}${(slot.desc||'').length>60?'…':''}</div>
-          <div style="font-size:10px;color:#ffd23d;margin-top:4px;">${priceStr}</div>
-        </div>`;
-      }).join('')}
-    </div>
-  `;
-
-  gridEl.querySelectorAll('.dailySlot').forEach(el => {
-    el.addEventListener('click', () => {
-      const slot = slots[Number(el.dataset.idx)];
-      if(!slot) return;
-      if(slot.id && hasUnlocked && hasUnlocked(slot.id)){ alert(`You already own ${slot.name}!`); return; }
-      if(slot.id && hasAbility && hasAbility(slot.id)){ alert(`You already own ${slot.name}!`); return; }
-      const funds = slot.currency==='coins' ? getCoins() : slot.currency==='cash' ? getCash() : getNuggets();
-      if(funds < slot.price){ alert(`Not enough ${slot.currency}!`); return; }
-      if(!confirm(`Buy ${slot.name} for ${slot.price} ${slot.currency}?`)) return;
-      if(slot.currency==='coins') spendCoins(slot.price);
-      else if(slot.currency==='cash') spendCash(slot.price);
-      else spendNuggets(slot.price);
-      if(slot.id) unlockSkin(slot.id);
-      SFX.powerupPickup();
-      renderCurrency();
-      el.style.opacity = '0.4';
-      el.style.pointerEvents = 'none';
-      el.querySelector('div:last-child').textContent = '✓ OWNED';
-    });
-  });
-}
-
-
 function openSkinsScreen(){
   const wrap = document.getElementById('wrap');
   const overlay = document.createElement('div');
@@ -7052,7 +6871,6 @@ function openSkinsScreen(){
   const categories = [
     { key:'upgrades', label:'UPGRADES', upgrades:true },
     { key:'abilities', label:'ABILITIES', abilities:true },
-    { key:'daily', label:'DAILY SHOP', daily:true },
     { key:'blackmarket', label:'BLACK MARKET', blackmarket:true },
     { key:'limited', label:'LIMITED', limited:true },
     { key:'display', label:'DISPLAY', display:true },
@@ -7753,11 +7571,6 @@ function openSkinsScreen(){
         empty.textContent = 'The market is empty right now — check back later.';
         gridEl.appendChild(empty);
       }
-      return;
-    }
-
-    if(cat.daily){
-      renderDailyShop(gridEl, renderCurrency);
       return;
     }
 
