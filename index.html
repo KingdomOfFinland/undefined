@@ -906,6 +906,9 @@
       <div class="mcBtn abilityBtn" id="abJamBtn">JAM</div>
       <div class="mcBtn abilityBtn" id="abBackupBtn">BACKUP</div>
       <div class="mcBtn abilityBtn" id="abHealBtn">HEAL</div>
+      <div class="mcBtn abilityBtn owned" id="abAfterburnerBtn">BOOST</div>
+      <div class="mcBtn abilityBtn" id="abSpawnBubbleBtn">BUBBLE</div>
+      <div class="mcBtn abilityBtn" id="abMissileCultBtn">CULT</div>
     </div>
   </div>
 
@@ -1823,6 +1826,9 @@ setupHoldButton('abPanicBtn', 'alt');
 setupHoldButton('abJamBtn', 'v');
 setupHoldButton('abBackupBtn', 'b');
 setupHoldButton('abHealBtn', 'h');
+setupHoldButton('abAfterburnerBtn', '0');
+setupHoldButton('abSpawnBubbleBtn', '1');
+setupHoldButton('abMissileCultBtn', '2');
 
 // Ability/nuke buttons only make sense once unlocked/available — reflect
 // that each time a run starts (abilities are bought between runs) and
@@ -1832,7 +1838,9 @@ function refreshMobileAbilityButtons(){
     ['abShieldBtn','shield_ability'],
     ['abPanicBtn','missilepanic_ability'],
     ['abJamBtn','commsjam_ability'],
-    ['abBackupBtn','backup_ability']
+    ['abBackupBtn','backup_ability'],
+    ['abSpawnBubbleBtn','spawnbubble_ability'],
+    ['abMissileCultBtn','missilecult_ability']
   ];
   for(const [id, abilityId] of map){
     const el = document.getElementById(id);
@@ -1840,6 +1848,9 @@ function refreshMobileAbilityButtons(){
   }
   const heal = document.getElementById('abHealBtn');
   if(heal) heal.classList.add('owned'); // emergency heal has no purchase gate
+  // Afterburner is always available (no purchase gate, just fuel)
+  const boost = document.getElementById('abAfterburnerBtn');
+  if(boost) boost.classList.add('owned');
 }
 function refreshMobileNukeButton(){
   const el = document.getElementById('nukeBtn');
@@ -6182,6 +6193,9 @@ window.addEventListener('keydown', (e) => {
       console.log('  devEditLb(id, changes) - edit a leaderboard entry, e.g. devEditLb("-Nabc123", {score:500})');
       console.log('  devFlagTrig(id, reason)- manually flag an existing leaderboard entry by id');
       console.log('  devGameEdit(opts)      - edit live game state, e.g. devGameEdit({hp:100, flares:5})');
+      console.log('  devPushLimited(id, opts) - push a new limited drop, e.g. devPushLimited("drop_the_hawk", { name, desc, price, type, payload, totalStock, durationHours })');
+      console.log('  devListLimited()       - list all currently active limited drops');
+      console.log('  devPullLimited(id)     - expire a limited drop immediately');
       console.log('  __setGameVersion(v)    - push a new live version, e.g. __setGameVersion("1.0.1") after deploying');
       alert('Dev mode enabled. Check the browser console for available commands.');
       const ind = document.getElementById('devIndicator');
@@ -6274,6 +6288,87 @@ window.devFlagTrig = async function(id, reason){
   console.log(ok ? `Entry ${id} (${entry.name}) flagged.` : 'Failed to submit flag.');
 };
  
+// ---------- Limited-drop console commands ----------
+// Push a new limited drop straight from the browser console without touching Firebase manually.
+// Must be signed in first: devSignIn()
+//
+// Usage:
+//   devPushLimited('drop_the_hawk', {
+//     name: 'The Hawk',
+//     desc: 'Ukrainian digital-camo F-16. Limited run.',
+//     price: 3000, priceCurrency: 'coins',        // priceCurrency optional, defaults to 'coins'
+//     type: 'skin', payload: { key:'ship', skinId:'thehawk' },
+//     totalStock: 100,                             // how many copies exist
+//     durationHours: 48                            // how long it's available (defaults to 48h)
+//   });
+//
+//   devPushLimited('drop_golden_pin', {
+//     name: 'Golden Pin Bundle',
+//     desc: 'CPU-pin bullet + missile skins. Limited run.',
+//     price: 8, priceCurrency: 'cash',
+//     type: 'skin', payload: { key:'bullet', skinId:'golden_pin_bullet' },
+//     totalStock: 200, durationHours: 72
+//   });
+//
+//   devListLimited()   — print all current drops to the console
+//   devPullLimited('drop_the_hawk')  — expire a drop immediately
+//
+window.devPushLimited = async function(id, opts){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!id || typeof opts !== 'object'){
+    console.warn('Usage: devPushLimited("drop_id", { name, desc, price, type, payload, totalStock, durationHours?, priceCurrency? })');
+    return;
+  }
+  if(!window.__adminUpdateEntry){ console.warn('Firebase module not loaded yet — try again in a moment.'); return; }
+  const required = ['name','desc','price','type','payload','totalStock'];
+  const missing = required.filter(k => opts[k] === undefined);
+  if(missing.length){ console.warn('Missing required fields:', missing.join(', ')); return; }
+  const stock = Number(opts.totalStock);
+  const hours = Number(opts.durationHours ?? 48);
+  const entry = {
+    name: String(opts.name),
+    desc: String(opts.desc),
+    price: Number(opts.price),
+    priceCurrency: String(opts.priceCurrency || 'coins'),
+    type: String(opts.type),
+    payload: opts.payload,
+    totalStock: stock,
+    remainingStock: stock,
+    expiresAt: Date.now() + hours * 3600 * 1000
+  };
+  const ok = await window.__adminUpdateEntry('limitedItems', { [id]: entry });
+  if(ok){
+    console.log(`%c[LIMITED DROP] "${opts.name}" pushed as "${id}" — ${stock} units, expires in ${hours}h.`, 'color:#ffd23d;font-weight:bold;');
+  } else {
+    console.error(`Failed to push "${id}" — are you signed in? (devSignIn())`);
+  }
+};
+
+window.devListLimited = async function(){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!window.__fetchLimitedItems){ console.warn('Firebase module not loaded yet.'); return; }
+  const items = await window.__fetchLimitedItems();
+  if(!items || !Object.keys(items).length){ console.log('No limited drops currently active.'); return; }
+  const rows = Object.entries(items).map(([id, v]) => ({
+    id,
+    name: v.name,
+    type: v.type,
+    price: `${v.price} ${v.priceCurrency||'coins'}`,
+    stock: `${v.remainingStock}/${v.totalStock}`,
+    expires: new Date(v.expiresAt).toLocaleString()
+  }));
+  console.table(rows);
+  return rows;
+};
+
+window.devPullLimited = async function(id){
+  if(!devMode){ console.warn('Dev mode not active.'); return; }
+  if(!id){ console.warn('Usage: devPullLimited("drop_id")'); return; }
+  if(!window.__adminUpdateEntry){ console.warn('Firebase module not loaded yet.'); return; }
+  const ok = await window.__adminUpdateEntry('limitedItems', { [id]: { expiresAt: Date.now() - 1 } });
+  console.log(ok ? `%c[LIMITED DROP] "${id}" expired immediately.` : `Failed to expire "${id}".`, 'color:#ff6b6b;font-weight:bold;');
+};
+
 window.devGameEdit = function(opts){
   if(!devMode){ console.warn('Dev mode not active.'); return; }
   if(!opts || typeof opts !== 'object'){
