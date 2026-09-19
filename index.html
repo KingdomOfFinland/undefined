@@ -481,14 +481,14 @@
     }
   };
  
-  window.__submitScore = async function(name, score, wave){
+  window.__submitScore = async function(name, score, wave, distance){
     try{
       const ip = await getClientIp();
       const ipKey = hashIp(ip);
       const lbRef = ref(db, 'leaderboard');
       const newEntryRef = push(lbRef);
       const now = Date.now();
-      await set(newEntryRef, { name: name.slice(0,12), score: Number(score) || 0, wave: Number(wave) || 0, ts: now, ipKey, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
+      await set(newEntryRef, { name: name.slice(0,12), score: Number(score) || 0, wave: Number(wave) || 0, distance: Number(distance) || 0, ts: now, ipKey, dateStr: new Date(now).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki' }) });
       return true;
     } catch(e){
       console.error('score submit failed', e);
@@ -856,6 +856,9 @@
     <div>
       <span>HULL</span>
       <div class="bar-bg"><div class="bar-fill" id="hpbar" style="width:100%"></div></div>
+      <span>DISTANCE: <span id="distanceCount">0</span> km</span>
+      <span>AFTERBURNER (0 / ↑)</span>
+      <div class="bar-bg"><div class="bar-fill" id="afterburnerBar" style="width:100%; background:linear-gradient(90deg,#ffd23d,#ff8a00);"></div></div>
       <span>FLARES: <span id="flarecount">3</span></span>
       <span>NUKES: <span id="nukecount">0</span></span>
     </div>
@@ -1307,26 +1310,25 @@ function pollGamepad(){
   gamepadIndex = gp.index;
  
   let mx = 0, my = 0;
-  // left stick
+  // left stick only — d-pad repurposed for abilities
   if(Math.abs(gp.axes[0]) > GP_DEADZONE) mx = gp.axes[0];
   if(Math.abs(gp.axes[1]) > GP_DEADZONE) my = gp.axes[1];
-  // d-pad overrides/adds to stick
-  if(gp.buttons[14] && gp.buttons[14].pressed) mx = -1;
-  if(gp.buttons[15] && gp.buttons[15].pressed) mx = 1;
-  if(gp.buttons[12] && gp.buttons[12].pressed) my = -1;
-  if(gp.buttons[13] && gp.buttons[13].pressed) my = 1;
- 
+
   const xBtn = gp.buttons[0] && gp.buttons[0].pressed;   // X = shoot
   const oBtn = gp.buttons[1] && gp.buttons[1].pressed;   // Circle = missile
-  const sqBtn = gp.buttons[2] && gp.buttons[2].pressed;  // Square/X = nuke
+  const sqBtn = gp.buttons[2] && gp.buttons[2].pressed;  // Square = nuke
   const triBtn = gp.buttons[3] && gp.buttons[3].pressed; // Triangle = flare
   const rtBtn = gp.buttons[7] && gp.buttons[7].pressed;  // R2/RT = shield ability
   const rbBtn = gp.buttons[5] && gp.buttons[5].pressed;  // R1/RB = missile panic ability
   const lbBtn = gp.buttons[4] && gp.buttons[4].pressed;  // L1/LB = comms jam ability
   const ltBtn = gp.buttons[6] && gp.buttons[6].pressed;  // L2/LT = call backup
-  const selectBtn = gp.buttons[8] && gp.buttons[8].pressed; // Select/Back/View = emergency healing
- 
-  return { mx, my, xBtn, oBtn, sqBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn };
+  const selectBtn  = gp.buttons[8]  && gp.buttons[8].pressed;  // Select = emergency heal
+  const dpadUpBtn  = gp.buttons[12] && gp.buttons[12].pressed; // D-pad Up    = Afterburner (hold)
+  const dpadDownBtn  = gp.buttons[13] && gp.buttons[13].pressed; // D-pad Down  = Spawn Bubble
+  const dpadLeftBtn  = gp.buttons[14] && gp.buttons[14].pressed; // D-pad Left  = Missile Cult
+  const dpadRightBtn = gp.buttons[15] && gp.buttons[15].pressed; // D-pad Right = reserved
+
+  return { mx, my, xBtn, oBtn, sqBtn, triBtn, rtBtn, rbBtn, lbBtn, ltBtn, selectBtn, dpadUpBtn, dpadDownBtn, dpadLeftBtn, dpadRightBtn };
 }
 
 // ---------- Platform detection & touch controls ----------
@@ -3320,8 +3322,17 @@ const player = {
   rapidFireT:0, shieldT:0, spreadT:0, scoreMultT:0, wideRangeT:0, fireRateT:0,
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
   shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0,
-  nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0, onFireT:0, onFireDmgTick:0
+  spawnBubbleCd:0, missileCultCd:0,
+  nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0, onFireT:0, onFireDmgTick:0,
+  // ---- Distance-traveled + Afterburner ability (key 0) ----
+  distance:0, afterburnerActive:false,
+  afterburnerFuel:100, afterburnerMaxFuel:100
 };
+const AFTERBURNER_SPEED_MULT = 1.6;   // speed multiplier while active
+const AFTERBURNER_DRAIN_RATE = 1.2;   // fuel used per frame while held
+const AFTERBURNER_REGEN_RATE = 0.4;   // fuel regained per frame while not held
+const AFTERBURNER_MIN_TO_ACTIVATE = 8; // can't re-engage on fumes — avoids flicker at 0-1 fuel
+const DISTANCE_PER_SPEED_UNIT = 0.12; // tuning knob for how fast the DISTANCE stat climbs
  
 function damagePlayer(amount){
   if(player.shieldT>0) return false;
@@ -3940,6 +3951,8 @@ function updatePowerupTimers(){
   if(player.missilePanicAbilityCd>0) player.missilePanicAbilityCd--;
   if(player.commsJamAbilityCd>0) player.commsJamAbilityCd--;
   if(player.emergencyHealCd>0) player.emergencyHealCd--;
+  if(player.spawnBubbleCd>0) player.spawnBubbleCd--;
+  if(player.missileCultCd>0) player.missileCultCd--;
   if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
@@ -4265,11 +4278,31 @@ function updatePlayer(){
   if(gp){ mx += gp.mx; my += gp.my; }
   mx += touchMove.x; my += touchMove.y;
   mx = clamp(mx,-1,1); my = clamp(my,-1,1);
+
+  // ---- Afterburner (key 0). No gamepad button wired up yet — this game's
+  // pollGamepad() doesn't expose a free d-pad/button for it, so that'd need
+  // its own look before adding a controller binding here.
+  const afterburnerHeld = keys['0'] || (gp && gp.dpadUpBtn);
+  if(afterburnerHeld && (player.afterburnerActive ? player.afterburnerFuel>0 : player.afterburnerFuel>=AFTERBURNER_MIN_TO_ACTIVATE)){
+    if(!player.afterburnerActive) SFX.uiClick(); // swap for a dedicated afterburner SFX later
+    player.afterburnerActive = true;
+    player.afterburnerFuel = Math.max(0, player.afterburnerFuel - AFTERBURNER_DRAIN_RATE);
+  } else {
+    player.afterburnerActive = false;
+    player.afterburnerFuel = Math.min(player.afterburnerMaxFuel, player.afterburnerFuel + AFTERBURNER_REGEN_RATE);
+  }
+  const effectiveSpeed = player.speed * (player.afterburnerActive ? AFTERBURNER_SPEED_MULT : 1);
+
   const len = Math.hypot(mx,my)||1;
-  player.x += (mx/len)*player.speed;
-  player.y += (my/len)*player.speed;
+  player.x += (mx/len)*effectiveSpeed;
+  player.y += (my/len)*effectiveSpeed;
   player.x = clamp(player.x, 20, W-20);
   player.y = clamp(player.y, 20, H-20);
+
+  // ---- Distance-traveled stat ----
+  // Ticks up whenever the plane is airborne (i.e. every frame of active flight),
+  // scaled by current speed so upgrades/perks and the afterburner both matter.
+  player.distance += effectiveSpeed * DISTANCE_PER_SPEED_UNIT;
  
   if(player.fireCd>0) player.fireCd--;
   if(player.flareCd>0) player.flareCd--;
@@ -4313,6 +4346,35 @@ function updatePlayer(){
     player.emergencyHealCd = 7200; // 2 min cooldown
     spawnParticles(player.x,player.y,'#5cff8a',20,4,4);
     SFX.emergencyHeal();
+  }
+
+  // ---- Spawn Bubble [key 1] — drop a random consumable. Cooldown 15-45s (random each use) ----
+  if((keys['1'] || (gp && gp.dpadDownBtn)) && hasAbility('spawnbubble_ability') && player.spawnBubbleCd<=0 && gameMode !== 'solar'){
+    powerups.push({ x:player.x, y:player.y, vy:1.3, type: pickPowerupType(), life:600, phase: Math.random()*Math.PI*2 });
+    player.spawnBubbleCd = Math.round((15 + Math.random()*30) * 60); // 15-45s in frames
+    spawnParticles(player.x, player.y, '#ffe066', 16, 3, 3);
+    SFX.powerupPickup();
+  }
+
+  // ---- Missile Cult [key 2] — fire 5 homing missiles at separate targets. Cooldown 90s ----
+  if((keys['2'] || (gp && gp.dpadLeftBtn)) && hasAbility('missilecult_ability') && player.missileCultCd<=0 && gameMode !== 'solar'){
+    const alive = enemies.filter(e => e.alive);
+    if(alive.length > 0){
+      const count = 5;
+      for(let i=0; i<count; i++){
+        const target = alive[i % alive.length];
+        const spread = (i - Math.floor(count/2)) * 12; // slight horizontal spread on launch
+        missiles.push(makeMissile({
+          x: player.x + spread, y: player.y - 10,
+          vx: spread * 0.08, vy: -4,
+          side: 'player', target,
+          speed: 7, turn: 0.13, life: 280, w: 6, h: 12
+        }, true));
+      }
+      player.missileCultCd = 90 * 60; // 90s in frames
+      spawnParticles(player.x, player.y, '#ff6b3d', 24, 5, 4);
+      SFX.missileLaunch();
+    }
   }
  
   if(missileHeld && player.missilePanicT<=0){
@@ -5460,6 +5522,8 @@ function render(){
 function updateHud(){
   document.getElementById('hpbar').style.width = clamp(player.hp,0,100)+'%';
   document.getElementById('wave').textContent = wave;
+  document.getElementById('distanceCount').textContent = (player.distance/1000).toFixed(2);
+  document.getElementById('afterburnerBar').style.width = clamp(player.afterburnerFuel,0,player.afterburnerMaxFuel)+'%';
 }
  
 function checkWaveEnd(){
@@ -5475,7 +5539,7 @@ function checkWaveEnd(){
 function renderLeaderboard(rows){
   const el = document.getElementById('lbList');
   if(!rows.length){ el.innerHTML = '<li>No scores yet — be the first</li>'; return; }
-  el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>${r.score} (wv${r.wave})</span></li>`).join('');
+  el.innerHTML = rows.map((r,i)=>`<li><span>#${i+1} ${r.name}</span><span>${r.score} (wv${r.wave}${r.distance ? `, ${(r.distance/1000).toFixed(1)}km` : ''})</span></li>`).join('');
 }
  
 function renderCurrencyLeaderboard(rows){
@@ -5544,7 +5608,7 @@ function gameOver(){
  
   center.innerHTML = `
     <h1 style="color:#f55;text-shadow:0 0 12px #f00;">SHOT DOWN</h1>
-    <p>Final score: <b>${score}</b> — Reached wave ${wave}</p>
+    <p>Final score: <b>${score}</b> — Reached wave ${wave} — Flew ${(player.distance/1000).toFixed(2)} km</p>
     ${unlockHtml}
     <input id="nameInput" maxlength="12" value="${savedName}">
     <a href="#" id="changeNameLink" style="font-size:11px;color:#8cf;">change callsign</a>
@@ -5608,10 +5672,10 @@ function gameOver(){
     btn.disabled = true; btn.textContent = 'SUBMITTING...';
     let ok;
     if(cheatFlagged){
-      ok = window.__submitFlagged ? await window.__submitFlagged(name, score, wave, cheatReason) : false;
+      ok = window.__submitFlagged ? await window.__submitFlagged(name, score, wave, cheatReason, player.distance) : false;
       btn.textContent = ok ? 'FLAGGED & SUBMITTED 🚩' : 'FAILED — RETRY';
     } else {
-      ok = window.__submitScore ? await window.__submitScore(name, score, wave) : false;
+      ok = window.__submitScore ? await window.__submitScore(name, score, wave, player.distance) : false;
       btn.textContent = ok ? 'SUBMITTED ✓' : 'FAILED — RETRY';
     }
     if(ok){
@@ -5717,8 +5781,10 @@ async function resetGame(theme){
   player.rapidFireT=0; player.shieldT=0; player.spreadT=0; player.scoreMultT=0; player.wideRangeT=0; player.fireRateT=0;
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
+  player.spawnBubbleCd=0; player.missileCultCd=0;
   player.nukeCharges=0; player.nukeCd=0; player.nukeAwardedAt=0; player.empT=0;
   player.onFireT=0; player.onFireDmgTick=0;
+  player.distance=0; player.afterburnerActive=false; player.afterburnerFuel=player.afterburnerMaxFuel;
   document.getElementById('nukecount').textContent = 0;
   bullets=[]; enemyBullets=[]; missiles=[]; enemies=[]; flares=[]; particles=[]; bombs=[]; powerups=[]; allies=[]; gasClouds=[];
  
@@ -5900,7 +5966,7 @@ function devShowShotDownPreview(){
     }
     setUsername(name);
     btn.disabled = true; btn.textContent = 'SUBMITTING...';
-    const ok = window.__submitScore ? await window.__submitScore(name, score, wave) : false;
+    const ok = window.__submitScore ? await window.__submitScore(name, score, wave, player.distance) : false;
     btn.textContent = ok ? 'SUBMITTED ✓' : 'FAILED — RETRY';
     if(ok) loadLeaderboard(); else btn.disabled = false;
   };
@@ -6296,7 +6362,9 @@ const ABILITY_DEFS = [
   { id:'shield_ability', name:'Shield Burst', desc:'On-demand 6s shield. Cooldown 20s.', costType:'coins', cost:400, keyLabel:'C', gpLabel:'RT', color:'#5ecbff' },
   { id:'missilepanic_ability', name:'Missile Panic', desc:'On-demand 10s missile barrage — locks every enemy on screen. Cooldown 30s.', costType:'cash', cost:12, keyLabel:'ALT', gpLabel:'RB', color:'#ff3d5c' },
   { id:'commsjam_ability', name:'Comms Jam', desc:'On-demand 20s enemy comms jam — missiles and drones turn on each other. Cooldown 50s.', costType:'coins', cost:450, keyLabel:'V', gpLabel:'LB', color:'#b388ff' },
-  { id:'backup_ability', name:'Call Backup', desc:'Calls in 4 fighter escorts (75 HP each). Usable again once your squad is wiped.', costType:'cash', cost:20, keyLabel:'B', gpLabel:'LT', color:'#4ecdc4' }
+  { id:'backup_ability', name:'Call Backup', desc:'Calls in 4 fighter escorts (75 HP each). Usable again once your squad is wiped.', costType:'cash', cost:20, keyLabel:'B', gpLabel:'LT', color:'#4ecdc4' },
+  { id:'spawnbubble_ability', name:'Spawn Bubble', desc:'Instantly drops a random consumable at your position. Cooldown 15–45s (random each use).', costType:'coins', cost:300, keyLabel:'1', gpLabel:'↓', color:'#ffe066' },
+  { id:'missilecult_ability', name:'Missile Cult', desc:'Unleashes 5 homing missiles that each lock onto separate targets. Cooldown 90s.', costType:'cash', cost:18, keyLabel:'2', gpLabel:'←', color:'#ff6b3d' }
 ];
  
 // ---------- Black Market ----------
