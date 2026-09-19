@@ -33,7 +33,7 @@ const CRATE_IDS = [
   'crate_convoy', 'crate_vault', 'crate_skins'
 ];
 const ABILITY_IDS = [
-  'ability_shield_ability', 'ability_missilepanic_ability', 'ability_commsjam_ability', 'ability_backup_ability'
+  'ability_shield_ability', 'ability_missilepanic_ability', 'ability_commsjam_ability', 'ability_backup_ability', 'ability_spawnbubble_ability', 'ability_missilecult_ability'
 ];
 const CONSUMABLE_IDS = [
   'consumable_extra_flare', 'consumable_instant_shield', 'consumable_head_start', 'consumable_second_chance'
@@ -78,6 +78,8 @@ const DISPLAY = {
   ability_missilepanic_ability: { name: 'Missile Panic',  price: 12,  type: 'ability' },
   ability_commsjam_ability:     { name: 'Comms Jam',      price: 450, type: 'ability' },
   ability_backup_ability:       { name: 'Call Backup',    price: 20,  type: 'ability' },
+  ability_spawnbubble_ability: { name: 'Spawn Bubble', price: 300, type: 'ability' },
+  ability_missilecult_ability: { name: 'Missile Cult', price: 18,  type: 'ability' },
   consumable_extra_flare:    { name: 'Flare Pack',      price: 100, type: 'consumable' },
   consumable_instant_shield: { name: 'Instant Shield',  price: 6,   type: 'consumable' },
   consumable_head_start:     { name: 'Head Start',      price: 250, type: 'consumable' },
@@ -89,7 +91,8 @@ const DISPLAY = {
   exclusive_ship_wraithcircuit:          { name: 'Wraith Circuit',       price: 180, type: 'exclusive' },
   exclusive_bullet_contraband_bullet:    { name: 'Contraband Rounds',    price: 80,  type: 'exclusive' },
   exclusive_missile_contraband_missile:  { name: 'Contraband Seeker',    price: 100, type: 'exclusive' },
-  exclusive_flare_contraband_flare:      { name: 'Contraband Flare',     price: 60,  type: 'exclusive' }
+  exclusive_flare_contraband_flare:      { name: 'Contraband Flare',     price: 60,  type: 'exclusive' },
+  
 };
 function displayFor(id){
   return DISPLAY[id] || { name: id, price: 0, type: id.startsWith('skin_') ? 'skin' : 'item' };
