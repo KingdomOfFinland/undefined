@@ -2370,6 +2370,65 @@ const SHIP_SKINS = [
     ctx.restore();
     drawThruster(ctx,th,'rgba(179,136,255,0.85)');
   }},
+  { id:'thehawk', name:'The Hawk', unlock:{type:'special'}, exclusive:true,
+    unlockDesc:"Claimed from a limited drop — Ukrainian digital camo F-16, wing roundels and all.", draw(ctx,th){
+    // F-16 Fighting Falcon silhouette — long sharp nose, mid-body cropped delta wings, strakes
+    // Base coat: light grey
+    ctx.fillStyle='#c8cdd2'; ctx.strokeStyle='#8a9099'; ctx.lineWidth=1.4;
+    ctx.beginPath();
+    ctx.moveTo(0,-24);           // sharp nose tip
+    ctx.lineTo(2,-10);
+    ctx.lineTo(4,-2);            // strake start
+    ctx.lineTo(16,8);            // left wing tip
+    ctx.lineTo(14,12);
+    ctx.lineTo(5,9);             // wing root back
+    ctx.lineTo(4,18);
+    ctx.lineTo(7,20); ctx.lineTo(4,22); ctx.lineTo(0,20); // tail
+    ctx.lineTo(-4,22); ctx.lineTo(-7,20); ctx.lineTo(-4,18);
+    ctx.lineTo(-5,9);
+    ctx.lineTo(-14,12); ctx.lineTo(-16,8);
+    ctx.lineTo(-4,-2);
+    ctx.lineTo(-2,-10);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    // digital camo patches — teal-green
+    ctx.fillStyle='#3d6b5a';
+    ctx.fillRect(-3,-16,5,6);
+    ctx.fillRect(1,-8,5,5);
+    ctx.fillRect(-7,-4,4,5);
+    ctx.fillRect(3,4,5,5);
+    ctx.fillRect(-6,8,4,4);
+    ctx.fillRect(2,12,4,4);
+
+    // digital camo patches — darker grey
+    ctx.fillStyle='#7a8490';
+    ctx.fillRect(-5,-14,3,4);
+    ctx.fillRect(4,-6,3,4);
+    ctx.fillRect(-3,2,4,4);
+    ctx.fillRect(5,9,3,4);
+    ctx.fillRect(-8,4,3,3);
+
+    // engine intake hint — dark oval under nose
+    ctx.fillStyle='#2a2e33';
+    ctx.beginPath(); ctx.ellipse(0,-4,3,2,0,0,Math.PI*2); ctx.fill();
+
+    // canopy — dark tinted glass
+    ctx.fillStyle='#1a2a3a';
+    ctx.beginPath(); ctx.ellipse(0,-10,2,4,0,0,Math.PI*2); ctx.fill();
+
+    // wing roundels — yellow ring, blue centre (Ukrainian)
+    ctx.fillStyle='#f5d800';
+    ctx.beginPath(); ctx.arc(-13,9,3.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#005bbb';
+    ctx.beginPath(); ctx.arc(-13,9,2,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle='#f5d800';
+    ctx.beginPath(); ctx.arc(13,9,3.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#005bbb';
+    ctx.beginPath(); ctx.arc(13,9,2,0,Math.PI*2); ctx.fill();
+
+    drawThruster(ctx,th,'rgba(180,200,220,0.85)');
+  }},
   { id:'terraguardian', name:'Terra Guardian', unlock:{type:'special'}, exclusive:true,
     unlockDesc:"Claimed from a limited drop — Earth-toned hull, orbit-ring accents.", draw(ctx,th){
     ctx.fillStyle='#0f2a1a'; ctx.strokeStyle='#4dd67a'; ctx.lineWidth=1.6;
@@ -2402,7 +2461,8 @@ const BULLET_SKINS = [
   { id:'cash_bullet', name:'Reaper Rounds', unlock:{type:'cash', value:6}, color:'#6bff8f' },
   { id:'nugget_bullet', name:'Nugget Rounds', unlock:{type:'nuggets', value:40}, color:'#d9a441' },
   { id:'aurora_bullet', name:'Aurora Rounds', unlock:{type:'score', value:16000}, color:'#7fffd4' },
-  { id:'contraband_bullet', name:'Contraband Rounds', unlock:{type:'nuggets', value:80}, exclusive:true, color:'#ff2fd6' }
+  { id:'contraband_bullet', name:'Contraband Rounds', unlock:{type:'nuggets', value:80}, exclusive:true, color:'#ff2fd6' },
+  { id:'golden_pin_bullet', name:'Golden Pin', unlock:{type:'special'}, exclusive:true, unlockDesc:'Claimed from a limited drop — precision-machined CPU pin rounds.', color:'#f0c040' }
 ];
  
 const MISSILE_SKINS = [
@@ -2416,7 +2476,8 @@ const MISSILE_SKINS = [
   { id:'cash_missile', name:'Reaper Seeker', unlock:{type:'cash', value:8}, color:'#ff3d5c' },
   { id:'nugget_missile', name:'Nugget Seeker', unlock:{type:'nuggets', value:50}, color:'#d9a441' },
   { id:'aurora_missile', name:'Aurora Seeker', unlock:{type:'wave', value:22}, color:'#7fffd4' },
-  { id:'contraband_missile', name:'Contraband Seeker', unlock:{type:'nuggets', value:100}, exclusive:true, color:'#ff2fd6' }
+  { id:'contraband_missile', name:'Contraband Seeker', unlock:{type:'nuggets', value:100}, exclusive:true, color:'#ff2fd6' },
+  { id:'golden_pin_missile', name:'Golden Pin Seeker', unlock:{type:'special'}, exclusive:true, unlockDesc:'Claimed from a limited drop — gold-plated precision missile, CPU pin aesthetic.', color:'#d4a017' }
 ];
  
 const FLARE_SKINS = [
@@ -5269,9 +5330,28 @@ function drawEnemy(e){
  
 function drawBullets(){
   const equipped = getEquippedSkins();
-  const bulletColor = getSkinById(BULLET_SKINS, equipped.bullet).color;
-  ctx.fillStyle = bulletColor;
-  for(const b of bullets) ctx.fillRect(b.x-b.w/2,b.y-b.h/2,b.w,b.h);
+  const bulletSkin = getSkinById(BULLET_SKINS, equipped.bullet);
+  const bulletColor = bulletSkin.color;
+  const isGoldenPin = bulletSkin.id === 'golden_pin_bullet';
+  for(const b of bullets){
+    if(isGoldenPin){
+      // CPU pin look — slim gold rod with a bright tip and dark base band
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.fillStyle = '#f0c040';
+      ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
+      // bright tip
+      ctx.fillStyle = '#fff8cc';
+      ctx.fillRect(-b.w/2, -b.h/2, b.w, 2);
+      // dark base band
+      ctx.fillStyle = '#8a6a00';
+      ctx.fillRect(-b.w/2, b.h/2-2, b.w, 2);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = bulletColor;
+      ctx.fillRect(b.x-b.w/2,b.y-b.h/2,b.w,b.h);
+    }
+  }
   for(const b of enemyBullets){
     ctx.fillStyle = b.golden ? '#ffd700' : '#fc6';
     ctx.beginPath(); ctx.arc(b.x,b.y,4,0,Math.PI*2); ctx.fill();
@@ -5280,7 +5360,9 @@ function drawBullets(){
  
 function drawMissiles(){
   const equipped = getEquippedSkins();
-  const missileColor = getSkinById(MISSILE_SKINS, equipped.missile).color;
+  const missileSkin = getSkinById(MISSILE_SKINS, equipped.missile);
+  const missileColor = missileSkin.color;
+  const isGoldenPin = missileSkin.id === 'golden_pin_missile';
   for(const m of missiles){
     ctx.save();
     ctx.translate(m.x,m.y);
@@ -5292,8 +5374,25 @@ function drawMissiles(){
       ctx.shadowColor = '#ffd700';
       ctx.shadowBlur = 8 + Math.sin(frame*0.3)*3;
     }
-    ctx.fillStyle = m.side==='player' ? missileColor : (m.golden ? '#ffd700' : '#f74');
-    ctx.fillRect(-3,-8,6,16);
+    if(m.side==='player' && isGoldenPin){
+      // CPU pin missile — gold body, bright tip, dark band near base, subtle glow
+      ctx.shadowColor = '#d4a017';
+      ctx.shadowBlur = 6 + Math.sin(frame*0.25)*2;
+      ctx.fillStyle = '#d4a017';
+      ctx.fillRect(-3,-8,6,16);
+      // bright tip
+      ctx.fillStyle = '#fff5a0';
+      ctx.fillRect(-3,-8,6,3);
+      // dark band
+      ctx.fillStyle = '#7a5800';
+      ctx.fillRect(-3,4,6,3);
+      // slim centre line highlight
+      ctx.fillStyle = 'rgba(255,240,150,0.5)';
+      ctx.fillRect(-1,-8,2,16);
+    } else {
+      ctx.fillStyle = m.side==='player' ? missileColor : (m.golden ? '#ffd700' : '#f74');
+      ctx.fillRect(-3,-8,6,16);
+    }
     ctx.restore();
   }
 }
