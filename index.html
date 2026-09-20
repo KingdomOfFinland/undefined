@@ -271,8 +271,9 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getDatabase, ref, push, query, orderByChild, limitToLast, get, set, update, remove, runTransaction, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
- 
-  const firebaseConfig = {
+
+  // ---------- Undefined Fighter Firebase (leaderboard, currency, shop etc) ----------
+  const ufConfig = {
     apiKey: "AIzaSyAZkoVj8ibuGNUM2wciC3qnhGTkDtnOdPk",
     authDomain: "undefined-fighter.firebaseapp.com",
     databaseURL: "https://undefined-fighter-default-rtdb.europe-west1.firebasedatabase.app",
@@ -282,10 +283,26 @@
     appId: "1:29093275337:web:6ae96c4371ad5fd4b88f18",
     measurementId: "G-KNEH4SXY4N"
   };
- 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  const auth = getAuth(app);
+
+  // ---------- Fish Auth Firebase (shared player accounts) ----------
+  const fishAuthConfig = {
+    apiKey: "AIzaSyDR-yla1Pv_NK6TDrb0icQnC5mfrPQo2iM",
+    authDomain: "fish-auth-b87c0.firebaseapp.com",
+    databaseURL: "https://fish-auth-b87c0-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "fish-auth-b87c0",
+    storageBucket: "fish-auth-b87c0.firebasestorage.app",
+    messagingSenderId: "363427570417",
+    appId: "1:363427570417:web:68c1db168fd372f343bf50",
+    measurementId: "G-NSZ4MKWM29"
+  };
+
+  const ufApp   = initializeApp(ufConfig, 'uf');
+  const fishApp = initializeApp(fishAuthConfig, 'fish-auth');
+
+  const db      = getDatabase(ufApp);
+  const fishDb  = getDatabase(fishApp);
+  const auth    = getAuth(ufApp);       // UF auth (legacy admin Google sign-in)
+  const fishAuth = getAuth(fishApp);    // Fish Auth (player accounts)
 
   // ---- Version check ----
   // Bump GAME_VERSION here every time you deploy. The 'gameVersion' node in
@@ -322,20 +339,30 @@
   };
   window.__currentUid = null;
   window.__currentUser = null;
- 
-  onAuthStateChanged(auth, (user) => {
+
+  // Fish Auth handles player sign-in state
+  onAuthStateChanged(fishAuth, (user) => {
     window.__currentUid = user ? user.uid : null;
     window.__currentUser = user ? { uid: user.uid, name: user.displayName || null, email: user.email || null, photo: user.photoURL || null } : null;
     if(user){
-      console.log('%c[SIGNED IN]', 'color:#0f8;font-weight:bold;', 'uid:', user.uid, 'email:', user.email);
+      console.log('%c[FISH AUTH SIGNED IN]', 'color:#0f8;font-weight:bold;', 'uid:', user.uid, 'email:', user.email);
+      // Sync player data from fish-auth db into UF
+      const playerRef = ref(fishDb, 'players/' + user.uid);
+      get(playerRef).then(snap => {
+        if(snap.exists()){
+          window.__fishPlayerData = snap.val();
+          window.dispatchEvent(new CustomEvent('uf-playerdata', { detail: snap.val() }));
+        }
+      });
     }
     window.dispatchEvent(new CustomEvent('uf-authchanged', { detail: window.__currentUser }));
   });
- 
+
+  // Admin Google sign-in still uses UF auth
   window.__adminSignIn = async function(){
     try{
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' }); // always show the picker — otherwise Google silently reuses whichever account was used last, which may not be the admin one
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       console.log('%cSigned in as', 'color:#0f8;', result.user.email);
       console.log('%cYour UID:', 'color:#0f8;font-weight:bold;', result.user.uid);
@@ -346,21 +373,64 @@
     }
   };
 
-  // Superseded by __accountRegister/__accountLogin below, which is what the
-  // in-game Account button now calls — left in place unused in case Google
-  // linking gets added back for regular players later.
-  window.__playerSignIn = async function(){
+  // Fish Engine sign-in (username@fish.local via fishAuth)
+  window.__fishSignIn = async function(username, password){
     try{
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      return { uid: result.user.uid, name: result.user.displayName || null, email: result.user.email || null };
+      const email = username.trim().toLowerCase().slice(0,12) + '@fish.local';
+      const result = await signInWithEmailAndPassword(fishAuth, email, password);
+      return { ok:true, uid: result.user.uid };
     } catch(e){
-      console.error('Player sign-in failed', e);
-      return null;
+      const reason = e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' ? 'badpassword'
+        : e.code === 'auth/user-not-found' ? 'notfound'
+        : e.code === 'auth/invalid-email' ? 'invalidemail'
+        : 'unknown';
+      return { ok:false, reason };
     }
   };
+
+  // Fish Engine register (creates username@fish.local account)
+  window.__fishRegister = async function(username, password){
+    try{
+      const email = username.trim().toLowerCase().slice(0,12) + '@fish.local';
+      const result = await createUserWithEmailAndPassword(fishAuth, email, password);
+      // Store profile in fish-auth db
+      await set(ref(fishDb, 'players/' + result.user.uid + '/profile'), {
+        name: username.trim().slice(0,12),
+        createdAt: Date.now(),
+        game: 'undefined-fighter'
+      });
+      return { ok:true, uid: result.user.uid };
+    } catch(e){
+      const reason = e.code === 'auth/email-already-in-use' ? 'taken'
+        : e.code === 'auth/weak-password' ? 'weakpassword'
+        : 'unknown';
+      return { ok:false, reason };
+    }
+  };
+
+  // Google sign-in for players (via fishAuth)
+  window.__googleSignIn = async function(){
+    try{
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(fishAuth, provider);
+      // Store/update profile in fish-auth db
+      await set(ref(fishDb, 'players/' + result.user.uid + '/profile'), {
+        name: result.user.displayName || result.user.email.split('@')[0],
+        email: result.user.email,
+        photo: result.user.photoURL || null,
+        createdAt: Date.now(),
+        game: 'undefined-fighter'
+      });
+      return { ok:true, uid: result.user.uid, name: result.user.displayName };
+    } catch(e){
+      console.error('Google sign-in failed', e);
+      return { ok:false, reason: e.code || 'unknown' };
+    }
+  };
+
   window.__playerSignOut = async function(){
-    try{ await signOut(auth); return true; }
+    try{ await signOut(fishAuth); return true; }
     catch(e){ console.error('Sign-out failed', e); return false; }
   };
 
@@ -372,7 +442,7 @@
   // admin sign-in above, so logging in as a player and signing in as admin
   // are mutually exclusive on one tab (already true before this existed).
   function accountEmail(username){
-    return normalizeName(username).toLowerCase() + '@undefined-fighter.local';
+    return username.trim().toLowerCase().slice(0,12) + '@fish.local';
   }
   // Registers a NEW password for a callsign. Handles two cases the same way:
   // a brand-new callsign (claims it in usernames/{key} first), or an
@@ -385,16 +455,13 @@
     const key = normalizeName(username).toLowerCase();
     if(!key) return { ok:false, reason:'empty' };
     if(!password || password.length < 6) return { ok:false, reason:'weakpassword' };
+    // Also claim in UF usernames node so callsign stays unique
     const nameRef = ref(db, 'usernames/' + key);
     try{
       const snap = await get(nameRef);
       if(!snap.exists()){
         const result = await runTransaction(nameRef, (current) => current === null ? true : undefined);
-        if(!result.committed){
-          // Lost a race to claim it — fall through, the auth call below
-          // will correctly fail with 'taken' if it's already secured, or
-          // succeed if it's still just an unsecured guest claim.
-        }
+        if(!result.committed){ /* lost race, auth call will handle */ }
       }
     } catch(e){
       console.error('username claim check failed', e);
@@ -402,7 +469,7 @@
     }
     let uid;
     try{
-      const result = await createUserWithEmailAndPassword(auth, accountEmail(username), password);
+      const result = await createUserWithEmailAndPassword(fishAuth, accountEmail(username), password);
       uid = result.user.uid;
     } catch(e){
       if(e.code === 'auth/email-already-in-use') return { ok:false, reason:'taken' };
@@ -410,22 +477,17 @@
       console.error('account register failed', e);
       return { ok:false, reason:'error' };
     }
-    // Auth account exists at this point — registration succeeded regardless
-    // of whether this profile write lands, so failures here are logged but
-    // non-fatal (matches the players/$uid/profile {name} shape your rules
-    // validate, not a bare players/$uid/username string).
     try{
-      await set(ref(db, 'players/' + uid + '/profile'), { name: normalizeName(username) });
-    } catch(e){
-      console.error('profile write failed (non-fatal)', e);
-    }
+      await set(ref(fishDb, 'players/' + uid + '/profile'), { name: normalizeName(username), createdAt: Date.now(), game: 'undefined-fighter' });
+    } catch(e){ console.error('profile write failed (non-fatal)', e); }
     return { ok:true, uid };
   };
+
   window.__accountLogin = async function(username, password){
     const key = normalizeName(username).toLowerCase();
     if(!key || !password) return { ok:false, reason:'empty' };
     try{
-      const result = await signInWithEmailAndPassword(auth, accountEmail(username), password);
+      const result = await signInWithEmailAndPassword(fishAuth, accountEmail(username), password);
       return { ok:true, uid: result.user.uid };
     } catch(e){
       if(e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password') return { ok:false, reason:'badpassword' };
@@ -1665,20 +1727,32 @@ function openAccountModal(){
     const wrap = document.getElementById('wrap');
     const overlay = document.createElement('div');
     overlay.id = 'accountOverlay';
-    overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:80; padding:16px;';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,5,10,0.97);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:80;padding:16px;';
     const existingName = (getUsername() || '').replace(/"/g,'');
     overlay.innerHTML = `
-      <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:320px; text-align:center;">
-        <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 8px;">PILOT ACCOUNT</h2>
-        <div style="font-size:10px; color:#8cf; margin-bottom:10px;">An account syncs your currency, skins &amp; inventory across devices and lets you join auctions. If your callsign is unclaimed or you haven't secured it yet, REGISTER sets its password for the first time.</div>
-        <input id="acctUser" placeholder="Callsign (max 12 chars)" maxlength="12" value="${existingName}" style="width:100%; box-sizing:border-box; margin-bottom:8px; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
-        <input id="acctPass" type="password" placeholder="Password (6+ chars)" style="width:100%; box-sizing:border-box; margin-bottom:8px; padding:6px; font-family:inherit; background:#031117; color:#cdeaff; border:1px solid #145;">
-        <div id="acctStatus" style="font-size:10px; color:#f88; min-height:14px; margin-bottom:8px;"></div>
-        <div style="display:flex; gap:8px; justify-content:center; margin-bottom:8px;">
-          <button id="acctLoginBtn">LOG IN</button>
-          <button id="acctRegisterBtn">REGISTER</button>
+      <div style="background:#0a1a22;border:2px solid #0af;padding:24px;width:100%;max-width:340px;text-align:center;border-radius:4px;">
+        <h2 style="font-size:18px;color:#0ff;text-shadow:0 0 8px #0ff;margin:0 0 4px;">PILOT ACCOUNT</h2>
+        <div style="font-size:10px;color:#8cf;margin-bottom:16px;">Sign in to sync currency, skins &amp; inventory across devices.</div>
+
+        <!-- Google sign-in -->
+        <button id="acctGoogleBtn" style="width:100%;margin-bottom:8px;background:#fff;color:#333;border:none;padding:10px;font-size:13px;font-family:inherit;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Sign in with Google
+        </button>
+
+        <!-- Fish Engine sign-in -->
+        <div style="border:1px solid #0af;border-radius:3px;padding:12px;margin-bottom:8px;">
+          <div style="font-size:10px;color:#0af;margin-bottom:8px;letter-spacing:1px;">🐟 FISH ENGINE ACCOUNT</div>
+          <input id="acctUser" placeholder="Callsign (max 12 chars)" maxlength="12" value="${existingName}" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:6px;font-family:inherit;background:#031117;color:#cdeaff;border:1px solid #145;">
+          <input id="acctPass" type="password" placeholder="Password (6+ chars)" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:6px;font-family:inherit;background:#031117;color:#cdeaff;border:1px solid #145;">
+          <div style="display:flex;gap:8px;justify-content:center;">
+            <button id="acctLoginBtn">LOG IN</button>
+            <button id="acctRegisterBtn">REGISTER</button>
+          </div>
         </div>
-        <button id="acctCancelBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CANCEL</button>
+
+        <div id="acctStatus" style="font-size:10px;color:#f88;min-height:14px;margin-bottom:8px;"></div>
+        <button id="acctCancelBtn" style="background:#123;color:#8cf;border:1px solid #145;font-size:11px;padding:6px 12px;font-weight:normal;box-shadow:none;">CANCEL</button>
       </div>
     `;
     wrap.appendChild(overlay);
@@ -1686,21 +1760,38 @@ function openAccountModal(){
     function close(user){ wrap.removeChild(overlay); resolve(user || null); }
     overlay.querySelector('#acctCancelBtn').onclick = () => { SFX.uiClick(); close(null); };
 
+    // Google sign-in
+    overlay.querySelector('#acctGoogleBtn').onclick = async () => {
+      SFX.uiClick();
+      statusEl.style.color = '#8cf'; statusEl.textContent = 'Opening Google sign-in...';
+      const result = await window.__googleSignIn();
+      if(result.ok){
+        const displayName = result.name || getUsername() || 'Pilot';
+        setUsername(displayName.slice(0,12));
+        SFX.powerupPickup();
+        statusEl.style.color = '#0f8'; statusEl.textContent = `Signed in as ${displayName}!`;
+        setTimeout(() => close(window.__currentUser), 600);
+      } else {
+        statusEl.style.color = '#f88'; statusEl.textContent = 'Google sign-in failed — try again.';
+      }
+    };
+
+    // Fish Engine sign-in
     async function attempt(kind){
       const nameIn = overlay.querySelector('#acctUser').value.trim();
       const passIn = overlay.querySelector('#acctPass').value;
       const loginBtn = overlay.querySelector('#acctLoginBtn');
       const regBtn = overlay.querySelector('#acctRegisterBtn');
-      if(!nameIn){ statusEl.style.color = '#f88'; statusEl.textContent = 'Enter a callsign.'; return; }
-      if(!passIn || passIn.length < 6){ statusEl.style.color = '#f88'; statusEl.textContent = 'Password needs 6+ characters.'; return; }
+      if(!nameIn){ statusEl.style.color='#f88'; statusEl.textContent='Enter a callsign.'; return; }
+      if(!passIn || passIn.length < 6){ statusEl.style.color='#f88'; statusEl.textContent='Password needs 6+ characters.'; return; }
       const fn = kind === 'login' ? window.__accountLogin : window.__accountRegister;
-      if(!fn){ statusEl.style.color = '#f88'; statusEl.textContent = 'Accounts unavailable right now.'; return; }
+      if(!fn){ statusEl.style.color='#f88'; statusEl.textContent='Accounts unavailable right now.'; return; }
       loginBtn.disabled = true; regBtn.disabled = true;
       statusEl.style.color = '#8cf'; statusEl.textContent = kind === 'login' ? 'Logging in...' : 'Registering...';
       const result = await fn(nameIn, passIn);
       if(result.ok){
         setUsername(nameIn);
-        startDonationWatch(); // re-attach now — don't rely on uf-authchanged race-ordering vs the setUsername above
+        startDonationWatch();
         SFX.powerupPickup();
         statusEl.style.color = '#0f8';
         statusEl.textContent = kind === 'login' ? 'Logged in!' : 'Account secured!';
@@ -5551,7 +5642,33 @@ function generateEarthBackground(){
       const lx = cx + rand(-r*0.3,r*0.3), ly = cy + rand(-r*0.3,r*0.3);
       drawWrappedBlob(tctx, lx, ly, r*rand(0.12,0.22), '#1a5578', 0.9, EARTH_TILE_H);
     }
-  }
+
+    // houses scattered across land masses
+    if(!isDesert){
+      const numHouses = Math.floor(rand(2, 7));
+      for(let h=0; h<numHouses; h++){
+        const hx = cx + rand(-r*0.7, r*0.7);
+        const hy = cy + rand(-r*0.7, r*0.7);
+        const hw = rand(6, 11), hh = rand(5, 9);
+        // draw at normal position and wrapped positions for seam continuity
+        for(const wy of [0, -EARTH_TILE_H, EARTH_TILE_H]){
+          // walls
+          tctx.fillStyle = Math.random() < 0.5 ? '#d4c9a8' : '#c8bfa0';
+          tctx.fillRect(hx - hw/2, hy - hh/2 + wy, hw, hh);
+          // roof — triangle
+          tctx.fillStyle = Math.random() < 0.5 ? '#8b3a2a' : '#6b4c2a';
+          tctx.beginPath();
+          tctx.moveTo(hx - hw/2 - 1, hy - hh/2 + wy);
+          tctx.lineTo(hx, hy - hh/2 - hw*0.55 + wy);
+          tctx.lineTo(hx + hw/2 + 1, hy - hh/2 + wy);
+          tctx.closePath(); tctx.fill();
+          // window
+          tctx.fillStyle = 'rgba(255,240,180,0.7)';
+          tctx.fillRect(hx - 1.5, hy - 1 + wy, 3, 2.5);
+        }
+      }
+    }
+  } // end land mass loop
 
   earthCloudCanvas = document.createElement('canvas');
   earthCloudCanvas.width = W; earthCloudCanvas.height = EARTH_CLOUD_TILE_H;
@@ -5566,13 +5683,98 @@ function generateEarthBackground(){
 
 function drawEarthBackground(){
   if(!earthTerrainCanvas) generateEarthBackground();
-  const scrollSpeed = 1.4, cloudSpeed = 2.6; // clouds drift faster — parallax "closer to camera" feel
+  const scrollSpeed = 1.4, cloudSpeed = 2.6;
   const ty = (frame*scrollSpeed) % EARTH_TILE_H;
   ctx.drawImage(earthTerrainCanvas, 0, ty - EARTH_TILE_H, W, EARTH_TILE_H);
   ctx.drawImage(earthTerrainCanvas, 0, ty, W, EARTH_TILE_H);
   const cy = (frame*cloudSpeed) % EARTH_CLOUD_TILE_H;
   ctx.drawImage(earthCloudCanvas, 0, cy - EARTH_CLOUD_TILE_H, W, EARTH_CLOUD_TILE_H);
   ctx.drawImage(earthCloudCanvas, 0, cy, W, EARTH_CLOUD_TILE_H);
+  // Planetary backgrounds — visible only in their wave ranges
+  drawPlanetOverlay();
+}
+
+// Planet definitions — wave range, name, colors
+const PLANET_DEFS = [
+  { name:'Moon',    waveMin:85,  waveMax:120, r:38, bodyColor:'#c8c8c8', craterColor:'#a0a0a0', glowColor:'rgba(220,220,220,0.15)', label:'🌕 Moon' },
+  { name:'Venus',   waveMin:145, waveMax:160, r:44, bodyColor:'#e8c47a', craterColor:'#c9a55a', glowColor:'rgba(232,196,122,0.2)',  label:'🪐 Venus' },
+  { name:'Mercury', waveMin:200, waveMax:235, r:30, bodyColor:'#a09080', craterColor:'#7a6a5a', glowColor:'rgba(160,144,128,0.15)', label:'☿ Mercury' },
+  { name:'Sun',     waveMin:250, waveMax:275, r:70, bodyColor:'#fff176', craterColor:'#ffb300', glowColor:'rgba(255,200,0,0.35)',    label:'☀ Sun', isSun:true },
+];
+
+function drawPlanetOverlay(){
+  const planet = PLANET_DEFS.find(p => wave >= p.waveMin && wave <= p.waveMax);
+  if(!planet) return;
+
+  // Fade in over first 5 waves, fade out over last 5
+  const progress = (wave - planet.waveMin) / (planet.waveMax - planet.waveMin);
+  const alpha = Math.min(1, Math.min(wave - planet.waveMin, planet.waveMax - wave) / 5);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Fixed position top-right, slow drift
+  const px = W * 0.82 + Math.sin(frame * 0.003) * 6;
+  const py = H * 0.18 + Math.cos(frame * 0.002) * 4;
+  const r = planet.r;
+
+  // Glow
+  const grd = ctx.createRadialGradient(px, py, r * 0.5, px, py, r * 2.2);
+  grd.addColorStop(0, planet.glowColor);
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(px, py, r * 2.2, 0, Math.PI*2); ctx.fill();
+
+  // Body
+  ctx.fillStyle = planet.bodyColor;
+  ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
+
+  if(planet.isSun){
+    // Sun rays
+    ctx.strokeStyle = 'rgba(255,200,0,0.4)';
+    ctx.lineWidth = 2;
+    for(let i=0; i<12; i++){
+      const angle = (i / 12) * Math.PI*2 + frame * 0.005;
+      const x1 = px + Math.cos(angle) * (r + 5);
+      const y1 = py + Math.sin(angle) * (r + 5);
+      const x2 = px + Math.cos(angle) * (r + 18 + Math.sin(frame*0.05 + i)*4);
+      const y2 = py + Math.sin(angle) * (r + 18 + Math.sin(frame*0.05 + i)*4);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+    // Corona
+    const corona = ctx.createRadialGradient(px, py, r*0.8, px, py, r*1.3);
+    corona.addColorStop(0, 'rgba(255,220,0,0.5)');
+    corona.addColorStop(1, 'rgba(255,100,0,0)');
+    ctx.fillStyle = corona;
+    ctx.beginPath(); ctx.arc(px, py, r*1.3, 0, Math.PI*2); ctx.fill();
+  } else {
+    // Craters for rocky bodies
+    const craterSeed = planet.name.length * 7;
+    for(let i=0; i<5; i++){
+      const angle = (i / 5) * Math.PI*2 + craterSeed;
+      const dist = r * (0.3 + (i%3)*0.18);
+      const cx2 = px + Math.cos(angle) * dist;
+      const cy2 = py + Math.sin(angle) * dist;
+      const cr = r * (0.06 + (i%2)*0.05);
+      ctx.fillStyle = planet.craterColor;
+      ctx.beginPath(); ctx.arc(cx2, cy2, cr, 0, Math.PI*2); ctx.fill();
+    }
+    // Terminator shadow (day/night line)
+    const shadow = ctx.createRadialGradient(px - r*0.3, py, 0, px, py, r);
+    shadow.addColorStop(0.6, 'rgba(0,0,0,0)');
+    shadow.addColorStop(1, 'rgba(0,0,20,0.55)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Label
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.fillStyle = '#fff';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(planet.label, px, py + r + 14);
+
+  ctx.restore();
 }
 
 function drawStars(){
