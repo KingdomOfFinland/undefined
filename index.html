@@ -1248,9 +1248,23 @@ const MUSIC = (() => {
   };
 })();
  
-const keys = {};
-window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+// Auto-clear console every 60s to prevent RAM buildup from repeated error spam
+setInterval(() => console.clear(), 60000);
+
+// ---------- Global error handlers (advanced bugfixing) ----------
+window.addEventListener('error', e => {
+  console.warn(
+    `%c[UF ERROR] ${e.message}\n  at ${e.filename}:${e.lineno}:${e.colno}`,
+    'color:#ff6b6b;font-weight:bold;'
+  );
+});
+window.addEventListener('unhandledrejection', e => {
+  console.warn(
+    `%c[UF UNHANDLED PROMISE] ${e.reason}`,
+    'color:#ffd23d;font-weight:bold;'
+  );
+  e.preventDefault(); // stop it also logging as an uncaught error
+});
  
 // ---------- Gamepad support (PS3 layout) ----------
 // Standard mapping: 0=X(Cross), 1=Circle, 2=Square, 3=Triangle
