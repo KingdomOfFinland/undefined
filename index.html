@@ -7025,15 +7025,15 @@ async function renderDailyShop(gridEl, renderCurrency){
     el.addEventListener('click', () => {
       const slot = slots[Number(el.dataset.idx)];
       if(!slot) return;
-      if(slot.id && hasUnlocked && hasUnlocked(slot.id)){ alert(`You already own ${slot.name}!`); return; }
-      if(slot.id && hasAbility && hasAbility(slot.id)){ alert(`You already own ${slot.name}!`); return; }
+      if(slot.id && getOwnedSkins().includes(slot.id)){ alert(`You already own ${slot.name}!`); return; }
+      if(slot.id && hasAbility(slot.id)){ alert(`You already own ${slot.name}!`); return; }
       const funds = slot.currency==='coins' ? getCoins() : slot.currency==='cash' ? getCash() : getNuggets();
       if(funds < slot.price){ alert(`Not enough ${slot.currency}!`); return; }
       if(!confirm(`Buy ${slot.name} for ${slot.price} ${slot.currency}?`)) return;
       if(slot.currency==='coins') spendCoins(slot.price);
       else if(slot.currency==='cash') spendCash(slot.price);
       else spendNuggets(slot.price);
-      if(slot.id) unlockSkin(slot.id);
+      if(slot.id) ownSkin(slot.id);
       SFX.powerupPickup();
       renderCurrency();
       el.style.opacity = '0.4';
