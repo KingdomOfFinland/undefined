@@ -970,6 +970,11 @@
 </div>
  
 <script>
+// Early error catcher — must be first, before anything else
+window.onerror = function(msg, src, line, col, err){
+  console.error(`[UF EARLY ERROR] ${msg} @ line ${line}:${col}`, err);
+  return false;
+};
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height; // fixed world resolution — game logic never changes
@@ -1263,8 +1268,12 @@ window.addEventListener('unhandledrejection', e => {
     `%c[UF UNHANDLED PROMISE] ${e.reason}`,
     'color:#ffd23d;font-weight:bold;'
   );
-  e.preventDefault(); // stop it also logging as an uncaught error
+  e.preventDefault();
 });
+
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
  
 // ---------- Gamepad support (PS3 layout) ----------
 // Standard mapping: 0=X(Cross), 1=Circle, 2=Square, 3=Triangle
@@ -5305,7 +5314,12 @@ function drawPlayer(){
   } else {
     const equipped = getEquippedSkins();
     const shipSkin = getSkinById(SHIP_SKINS, equipped.ship);
-    shipSkin.draw(ctx, thrusting);
+    try {
+      shipSkin.draw(ctx, thrusting);
+    } catch(e) {
+      console.warn('[UF] Ship skin draw failed, falling back to default:', e);
+      getSkinById(SHIP_SKINS, 'default').draw(ctx, thrusting);
+    }
   }
   if(player.shieldT>0){
     const pulse = 1 + Math.sin(frame*0.2)*0.06;
