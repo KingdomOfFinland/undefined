@@ -1261,7 +1261,7 @@ const MUSIC = (() => {
     const a = ctx(); if(!a) return null;
     if(!master){
       master = a.createGain();
-      master.gain.value = 0.16;
+      master.gain.value = 0.24; // bumped up from 0.16 — was getting buried under gameplay SFX
       master.connect(a.destination);
     }
     return master;
@@ -1291,6 +1291,22 @@ const MUSIC = (() => {
     o.start(time); o.stop(time+dur+0.05);
   }
 
+  // Slow-attack sine pad, layered under the bass once per bar in the game
+  // scene — fills out the arrangement a bit without cluttering the mix.
+  function playPad(freq, time, dur, vol){
+    const a = ctx(); if(!a) return;
+    const m = ensureMaster(); if(!m) return;
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(freq, time);
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.linearRampToValueAtTime(vol*duckGain, time+0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, time+dur);
+    o.connect(g); g.connect(m);
+    o.start(time); o.stop(time+dur+0.1);
+  }
+
   function bpmFor(){ return Math.round((scene==='menu' ? 96 : 128) * intensity); }
 
   function scheduler(){
@@ -1300,17 +1316,20 @@ const MUSIC = (() => {
     while(nextStepTime < a.currentTime + 0.15){
       const i = stepIdx % 16;
       const bassIdx = BASS_PATTERN[i];
-      if(bassIdx >= 0) playNote('triangle', SCALE_BASS[bassIdx], nextStepTime, stepDur*0.9, 0.5);
+      if(bassIdx >= 0) playNote('triangle', SCALE_BASS[bassIdx], nextStepTime, stepDur*0.9, 0.55);
       if(scene === 'game'){
+        // root+fifth pad, once per bar — adds some body under the lead/bass
+        if(i === 0) playPad(SCALE_LEAD[0], nextStepTime, stepDur*16*0.95, 0.06);
+        if(i === 0) playPad(SCALE_LEAD[3], nextStepTime, stepDur*16*0.95, 0.045);
         const patt = LEAD_PATTERNS[bar % LEAD_PATTERNS.length];
         const leadIdx = patt[i];
         // sparser lead on lower intensity (easy difficulty) — denser/faster on hardcore
         if(leadIdx >= 0 && (intensity > 0.95 || i % 2 === 0)){
-          playNote('square', SCALE_LEAD[leadIdx], nextStepTime, stepDur*0.7, 0.11);
+          playNote('square', SCALE_LEAD[leadIdx], nextStepTime, stepDur*0.7, 0.14);
         }
       } else if(i % 4 === 0){
         const leadIdx = LEAD_PATTERNS[0][i];
-        if(leadIdx >= 0) playNote('sine', SCALE_LEAD[leadIdx], nextStepTime, stepDur*1.6, 0.08);
+        if(leadIdx >= 0) playNote('sine', SCALE_LEAD[leadIdx], nextStepTime, stepDur*1.6, 0.1);
       }
       nextStepTime += stepDur;
       stepIdx++;
@@ -1372,7 +1391,52 @@ window.addEventListener('unhandledrejection', e => {
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
- 
+
+// ---------- Remappable action keybinds ----------
+// Movement (WASD/arrows) stays fixed — everything else (fire/abilities/etc)
+// looks its key up through here so it can be rebound from Settings.
+const ACTIONS = [
+  { id:'fire',                  label:'Fire Gun',             default:'e' },
+  { id:'missile',               label:'Fire Missile',         default:'q' },
+  { id:'flare',                 label:'Flare / Countermeasure', default:'f' },
+  { id:'nuke',                  label:'Nuke',                 default:'n' },
+  { id:'shield_ability',        label:'Shield Burst',         default:'c' },
+  { id:'missilepanic_ability',  label:'Missile Panic',        default:'alt' },
+  { id:'commsjam_ability',      label:'Comms Jam',            default:'v' },
+  { id:'backup_ability',        label:'Call Backup',          default:'b' },
+  { id:'heal',                  label:'Emergency Heal',       default:'h' },
+  { id:'afterburner',           label:'Afterburner',          default:'0' },
+  { id:'spawnbubble_ability',   label:'Spawn Bubble',         default:'1' },
+  { id:'missilecult_ability',   label:'Missile Cult',         default:'2' }
+];
+function getKeybindsRaw(){
+  try { return JSON.parse(localStorage.getItem('uf_keybinds')) || {}; }
+  catch(e){ return {}; }
+}
+function getKeybind(actionId){
+  const custom = getKeybindsRaw();
+  if(custom[actionId]) return custom[actionId];
+  const def = ACTIONS.find(a => a.id === actionId);
+  return def ? def.default : null;
+}
+function setKeybind(actionId, key){
+  const custom = getKeybindsRaw();
+  custom[actionId] = key;
+  localStorage.setItem('uf_keybinds', JSON.stringify(custom));
+}
+function resetKeybinds(){
+  localStorage.removeItem('uf_keybinds');
+}
+// Keys reserved for movement — rebinding an action onto one of these would
+// silently break steering, so the picker warns (but doesn't block) on these.
+const RESERVED_MOVEMENT_KEYS = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'];
+function keyDisplayName(k){
+  if(k == null) return '—';
+  if(k === ' ') return 'SPACE';
+  if(k.startsWith('arrow')) return k.replace('arrow','').toUpperCase();
+  return k.toUpperCase();
+}
+
 // ---------- Gamepad support (PS3 layout) ----------
 // Standard mapping: 0=X(Cross), 1=Circle, 2=Square, 3=Triangle
 // D-pad: 12=up, 13=down, 14=left, 15=right. Left stick: axes[0]=x, axes[1]=y
@@ -1524,6 +1588,12 @@ const DIFFICULTIES = [
   { id:'hard',     label:'HARD',     hpMult:1.35, dmgMult:1.35, spawnRateMult:1.25, currencyMult:1.5,  musicIntensity:1.15 },
   { id:'hardcore', label:'HARDCORE', hpMult:1.75, dmgMult:1.75, spawnRateMult:1.5,  currencyMult:2.25, musicIntensity:1.3  }
 ];
+function getReduceGlitchPref(){
+  return localStorage.getItem('uf_reduce_glitch') === '1';
+}
+function setReduceGlitchPref(on){
+  localStorage.setItem('uf_reduce_glitch', on ? '1' : '0');
+}
 function getDifficultyPref(){
   return localStorage.getItem('uf_difficulty') || 'normal';
 }
@@ -1538,6 +1608,12 @@ function updateDifficultyBtnLabel(){
   btn.textContent = `⚔ Difficulty: ${getDifficultyDef(getDifficultyPref()).label}`;
 }
 
+function updateGlitchBtnLabel(){
+  const btn = document.getElementById('glitchToggleBtn');
+  if(!btn) return;
+  btn.textContent = getReduceGlitchPref() ? '🌀 Glitch Effects: OFF' : '🌀 Glitch Effects: ON';
+}
+
 function updateControlsInfoText(){
   const p = document.getElementById('controlsInfo');
   if(!p) return;
@@ -1549,11 +1625,15 @@ function updateControlsInfoText(){
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
     `;
   } else {
+    const fireK = keyDisplayName(getKeybind('fire'));
+    const missileK = keyDisplayName(getKeybind('missile'));
+    const flareK = keyDisplayName(getKeybind('flare'));
     p.innerHTML = `
-      F-8 vs everything. WASD/Arrows move. <b>E</b> guns. Hold <b>Q</b> near an enemy to lock on,
-      release to fire homing missile. <b>F</b> pops a flare to decoy incoming missiles.<br><br>
+      F-8 vs everything. WASD/Arrows move. <b>${fireK}</b> guns. Hold <b>${missileK}</b> near an enemy to lock on,
+      release to fire homing missile. <b>${flareK}</b> pops a flare to decoy incoming missiles.<br><br>
       Controller (PS3 layout): D-pad/L-Stick move, <b>X</b> shoot, <b>O</b> missile, <b>△</b> flare.<br><br>
       Survive the waves. UFOs, enemy fighters, bombers, a spaceship, Shahed drones, and shielded Sentinels incoming.
+      <br><br><span style="color:#789;">Rebind any of these in Settings → Key Bindings.</span>
     `;
   }
 }
@@ -1672,6 +1752,17 @@ function wireSettingsButtons(){
       updateDifficultyBtnLabel();
     };
   }
+  const glitchBtn = document.getElementById('glitchToggleBtn');
+  if(glitchBtn){
+    glitchBtn.onclick = () => {
+      SFX.uiClick();
+      setReduceGlitchPref(!getReduceGlitchPref());
+      updateGlitchBtnLabel();
+    };
+  }
+  updateGlitchBtnLabel();
+  const keybindsBtn = document.getElementById('openKeybindsBtn');
+  if(keybindsBtn) keybindsBtn.onclick = () => { SFX.uiClick(); openKeybindModal(); };
   updateCustomShipStatus();
   const templateBtn = document.getElementById('customShipTemplateBtn');
   if(templateBtn) templateBtn.onclick = () => { SFX.uiClick(); downloadShipTemplate(); };
@@ -1740,6 +1831,9 @@ function openSettingsModal(){
       <button id="btnSizeBtn" style="width:100%; margin-bottom:10px;">🔘 Button Size: NORMAL</button>
       <button id="resScaleBtn" style="width:100%; margin-bottom:10px;">🖥 Resolution: 100%</button>
       <button id="difficultyBtn" style="width:100%; margin-bottom:10px;">⚔ Difficulty: NORMAL</button>
+      <button id="glitchToggleBtn" style="width:100%; margin-bottom:6px;">🌀 Glitch Effects: ON</button>
+      <div style="font-size:9px; color:#789; margin-bottom:10px; text-align:left;">Turns off screen-inversion/flicker visuals from high-corruption waves. Recommended if you're sensitive to flashing effects.</div>
+      <button id="openKeybindsBtn" style="width:100%; margin-bottom:10px;">🎹 Key Bindings</button>
       <div style="border-top:1px solid #145; margin:4px 0 10px; padding-top:10px;">
         <div style="font-size:10px; color:#8cf; margin-bottom:6px;">🖼 Custom ship image — personal only, stays on this device</div>
         <div id="customShipStatus" style="font-size:10px; color:#5cff8a; margin-bottom:6px;"></div>
@@ -1756,6 +1850,87 @@ function openSettingsModal(){
   wrap.appendChild(overlay);
   wireSettingsButtons();
   document.getElementById('settingsCloseBtn').onclick = () => { SFX.uiClick(); wrap.removeChild(overlay); };
+}
+
+function openKeybindModal(){
+  const wrap = document.getElementById('wrap');
+  const overlay = document.createElement('div');
+  overlay.id = 'keybindOverlay';
+  overlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,5,10,0.97); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; z-index:90; padding:16px;';
+
+  const rows = ACTIONS.map(a => `
+    <div class="kbRow" data-action="${a.id}" style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid #123;">
+      <span style="font-size:11px; color:#cdeaff; text-align:left;">${a.label}</span>
+      <button class="kbRebindBtn" data-action="${a.id}" style="min-width:80px; font-size:11px; padding:6px 10px;">${keyDisplayName(getKeybind(a.id))}</button>
+    </div>
+  `).join('');
+
+  overlay.innerHTML = `
+    <div style="background:#0a1a22; border:2px solid #145; padding:20px; width:100%; max-width:360px; text-align:center;">
+      <h2 style="font-size:16px; color:#0ff; text-shadow:0 0 8px #0ff; margin:0 0 4px;">KEY BINDINGS</h2>
+      <div style="font-size:9px; color:#789; margin-bottom:10px;">Movement (WASD / arrow keys) is fixed. Click a key, then press the new one.</div>
+      <div id="kbList" style="max-height:280px; overflow-y:auto; text-align:left; margin-bottom:10px;">${rows}</div>
+      <div id="kbWarning" style="font-size:9px; color:#f88; min-height:12px; margin-bottom:8px;"></div>
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button id="kbResetBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">RESET ALL</button>
+        <button id="kbCloseBtn" style="background:#123; color:#8cf; border:1px solid #145; font-size:11px; padding:6px 12px; font-weight:normal; box-shadow:none;">CLOSE</button>
+      </div>
+    </div>
+  `;
+  wrap.appendChild(overlay);
+
+  const warningEl = overlay.querySelector('#kbWarning');
+  let listeningFor = null; // action id currently waiting for a keypress, or null
+
+  function refreshRow(actionId){
+    const btn = overlay.querySelector(`.kbRebindBtn[data-action="${actionId}"]`);
+    if(btn) btn.textContent = keyDisplayName(getKeybind(actionId));
+  }
+  function refreshAll(){
+    ACTIONS.forEach(a => refreshRow(a.id));
+  }
+
+  function startListening(actionId){
+    if(listeningFor) refreshRow(listeningFor); // cancel any previous row still in "press a key" state
+    listeningFor = actionId;
+    warningEl.textContent = '';
+    const btn = overlay.querySelector(`.kbRebindBtn[data-action="${actionId}"]`);
+    if(btn) btn.textContent = 'PRESS A KEY…';
+  }
+
+  function captureKey(e){
+    if(!listeningFor) return;
+    e.preventDefault();
+    if(e.key === 'Escape'){ refreshRow(listeningFor); listeningFor = null; return; }
+    const k = e.key.toLowerCase();
+    setKeybind(listeningFor, k);
+    SFX.uiClick();
+    warningEl.textContent = RESERVED_MOVEMENT_KEYS.includes(k)
+      ? 'Heads up — that key also steers your ship.'
+      : '';
+    refreshRow(listeningFor);
+    listeningFor = null;
+    updateControlsInfoText();
+  }
+  window.addEventListener('keydown', captureKey, true);
+
+  overlay.querySelectorAll('.kbRebindBtn').forEach(btn => {
+    btn.onclick = () => { SFX.uiClick(); startListening(btn.dataset.action); };
+  });
+  overlay.querySelector('#kbResetBtn').onclick = () => {
+    SFX.uiClick();
+    resetKeybinds();
+    listeningFor = null;
+    warningEl.textContent = '';
+    refreshAll();
+    updateControlsInfoText();
+  };
+  overlay.querySelector('#kbCloseBtn').onclick = () => {
+    SFX.uiClick();
+    window.removeEventListener('keydown', captureKey, true);
+    wrap.removeChild(overlay);
+    updateControlsInfoText();
+  };
 }
 
 function openAccountModal(){
@@ -1961,37 +2136,40 @@ const touchMove = { x:0, y:0 };
 })();
 
 // Press-and-hold button -> drives the same `keys[key]` flag the keyboard uses.
-function setupHoldButton(elId, key){
+function setupHoldButton(elId, actionId){
   const el = document.getElementById(elId);
   if(!el) return;
   let activeId = null;
+  let heldKey = null; // captured at press-time so a mid-hold rebind can't get the release stuck
   el.addEventListener('pointerdown', (e) => {
     activeId = e.pointerId;
     el.setPointerCapture(activeId);
     el.classList.add('pressed');
-    keys[key] = true;
+    heldKey = getKeybind(actionId);
+    if(heldKey) keys[heldKey] = true;
   });
   const release = (e) => {
     if(activeId !== null && e.pointerId !== activeId) return;
     activeId = null;
     el.classList.remove('pressed');
-    keys[key] = false;
+    if(heldKey) keys[heldKey] = false;
+    heldKey = null;
   };
   el.addEventListener('pointerup', release);
   el.addEventListener('pointercancel', release);
 }
-setupHoldButton('fireBtn', 'e');
-setupHoldButton('missileBtn', 'q');
-setupHoldButton('flareBtn', 'f');
-setupHoldButton('nukeBtn', 'n');
-setupHoldButton('abShieldBtn', 'c');
-setupHoldButton('abPanicBtn', 'alt');
-setupHoldButton('abJamBtn', 'v');
-setupHoldButton('abBackupBtn', 'b');
-setupHoldButton('abHealBtn', 'h');
-setupHoldButton('abAfterburnerBtn', '0');
-setupHoldButton('abSpawnBubbleBtn', '1');
-setupHoldButton('abMissileCultBtn', '2');
+setupHoldButton('fireBtn', 'fire');
+setupHoldButton('missileBtn', 'missile');
+setupHoldButton('flareBtn', 'flare');
+setupHoldButton('nukeBtn', 'nuke');
+setupHoldButton('abShieldBtn', 'shield_ability');
+setupHoldButton('abPanicBtn', 'missilepanic_ability');
+setupHoldButton('abJamBtn', 'commsjam_ability');
+setupHoldButton('abBackupBtn', 'backup_ability');
+setupHoldButton('abHealBtn', 'heal');
+setupHoldButton('abAfterburnerBtn', 'afterburner');
+setupHoldButton('abSpawnBubbleBtn', 'spawnbubble_ability');
+setupHoldButton('abMissileCultBtn', 'missilecult_ability');
 
 // Ability/nuke buttons only make sense once unlocked/available — reflect
 // that each time a run starts (abilities are bought between runs) and
@@ -3742,7 +3920,7 @@ function updatePlayerSolarMove(){
 
   // Tap-to-fire only in this mode — no holding down for autofire like the
   // normal mode. Each press fires once; has to be pressed again for another.
-  const fireInput = keys['e'] || keys[' '] || (gp && gp.xBtn);
+  const fireInput = keys[getKeybind('fire')] || keys[' '] || (gp && gp.xBtn);
   if(fireInput && !solarFireKeyPrev) tryFireGun();
   solarFireKeyPrev = fireInput;
 }
@@ -4517,7 +4695,7 @@ function updatePlayer(){
   // ---- Afterburner (key 0). No gamepad button wired up yet — this game's
   // pollGamepad() doesn't expose a free d-pad/button for it, so that'd need
   // its own look before adding a controller binding here.
-  const afterburnerHeld = keys['0'] || (gp && gp.dpadUpBtn);
+  const afterburnerHeld = keys[getKeybind('afterburner')] || (gp && gp.dpadUpBtn);
   if(afterburnerHeld && (player.afterburnerActive ? player.afterburnerFuel>0 : player.afterburnerFuel>=AFTERBURNER_MIN_TO_ACTIVATE)){
     if(!player.afterburnerActive) SFX.uiClick(); // swap for a dedicated afterburner SFX later
     player.afterburnerActive = true;
@@ -4542,15 +4720,15 @@ function updatePlayer(){
   if(player.fireCd>0) player.fireCd--;
   if(player.flareCd>0) player.flareCd--;
  
-  const shootHeld = keys['e'] || (gp && gp.xBtn);
-  const missileHeld = keys['q'] || (gp && gp.oBtn);
-  const flarePressed = keys['f'] || (gp && gp.triBtn && !gamepadPrev.tri);
-  const nukePressed = keys['n'] || (gp && gp.sqBtn && !gamepadPrev.sq);
-  const shieldAbilityHeld = keys['c'] || (gp && gp.rtBtn);
-  const missilePanicAbilityHeld = keys['alt'] || (gp && gp.rbBtn);
-  const commsJamAbilityHeld = keys['v'] || (gp && gp.lbBtn);
-  const backupAbilityHeld = keys['b'] || (gp && gp.ltBtn);
-  const emergencyHealHeld = keys['h'] || (gp && gp.selectBtn);
+  const shootHeld = keys[getKeybind('fire')] || (gp && gp.xBtn);
+  const missileHeld = keys[getKeybind('missile')] || (gp && gp.oBtn);
+  const flarePressed = keys[getKeybind('flare')] || (gp && gp.triBtn && !gamepadPrev.tri);
+  const nukePressed = keys[getKeybind('nuke')] || (gp && gp.sqBtn && !gamepadPrev.sq);
+  const shieldAbilityHeld = keys[getKeybind('shield_ability')] || (gp && gp.rtBtn);
+  const missilePanicAbilityHeld = keys[getKeybind('missilepanic_ability')] || (gp && gp.rbBtn);
+  const commsJamAbilityHeld = keys[getKeybind('commsjam_ability')] || (gp && gp.lbBtn);
+  const backupAbilityHeld = keys[getKeybind('backup_ability')] || (gp && gp.ltBtn);
+  const emergencyHealHeld = keys[getKeybind('heal')] || (gp && gp.selectBtn);
  
   if(shootHeld) tryFireGun();
   if(flarePressed) popFlare();
@@ -4584,7 +4762,7 @@ function updatePlayer(){
   }
 
   // ---- Spawn Bubble [key 1] — drop a random consumable. Cooldown 15-45s (random each use) ----
-  if((keys['1'] || (gp && gp.dpadDownBtn)) && hasAbility('spawnbubble_ability') && player.spawnBubbleCd<=0 && gameMode !== 'solar'){
+  if((keys[getKeybind('spawnbubble_ability')] || (gp && gp.dpadDownBtn)) && hasAbility('spawnbubble_ability') && player.spawnBubbleCd<=0 && gameMode !== 'solar'){
     powerups.push({ x:player.x, y:player.y, vy:1.3, type: pickPowerupType(), life:600, phase: Math.random()*Math.PI*2 });
     player.spawnBubbleCd = Math.round((15 + Math.random()*30) * 60); // 15-45s in frames
     spawnParticles(player.x, player.y, '#ffe066', 16, 3, 3);
@@ -4592,7 +4770,7 @@ function updatePlayer(){
   }
 
   // ---- Missile Cult [key 2] — fire 5 homing missiles at separate targets. Cooldown 90s ----
-  if((keys['2'] || (gp && gp.dpadLeftBtn)) && hasAbility('missilecult_ability') && player.missileCultCd<=0 && gameMode !== 'solar'){
+  if((keys[getKeybind('missilecult_ability')] || (gp && gp.dpadLeftBtn)) && hasAbility('missilecult_ability') && player.missileCultCd<=0 && gameMode !== 'solar'){
     const alive = enemies.filter(e => e.alive);
     if(alive.length > 0){
       const count = 5;
@@ -5427,8 +5605,9 @@ function drawPlayer(){
   ctx.save();
   ctx.translate(player.x, player.y);
   
-  // CORRUPTION: player also glitches with color inversion
-  if(corruptionLevel > 0.5){
+  // CORRUPTION: player also glitches with color inversion (skipped entirely
+  // in reduced-glitch mode — photosensitivity setting)
+  if(corruptionLevel > 0.5 && !getReduceGlitchPref()){
     ctx.filter = `invert(${corruptionLevel * 50}%)`;
   }
   
@@ -5470,8 +5649,9 @@ function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x,e.y);
   
-  // CORRUPTION: invert colors of some enemies at high corruption
-  const shouldInvert = corruptionLevel > 0.3 && Math.sin(frame * 0.05 + e.phase) > 0;
+  // CORRUPTION: invert colors of some enemies at high corruption (disabled
+  // in reduced-glitch mode — photosensitivity setting)
+  const shouldInvert = corruptionLevel > 0.3 && !getReduceGlitchPref() && Math.sin(frame * 0.05 + e.phase) > 0;
   if(shouldInvert){
     ctx.filter = `invert(${corruptionLevel * 100}%)`;
   }
@@ -5824,6 +6004,8 @@ function drawStars(){
  
 function renderCorruptionEffects(){
   if(corruptionLevel <= 0) return;
+  // Photosensitivity setting: skip all flicker/inversion/aberration overlays.
+  if(getReduceGlitchPref()) return;
   ctx.save();
   
   // Color inversion zones (stronger at higher corruption)
@@ -7687,7 +7869,7 @@ function openSkinsScreen(){
  
         const nameEl = document.createElement('div');
         nameEl.className = 'skinName';
-        nameEl.textContent = `${ab.name} [${ab.keyLabel} / ${ab.gpLabel}]`;
+        nameEl.textContent = `${ab.name} [${keyDisplayName(getKeybind(ab.id))} / ${ab.gpLabel}]`;
         card.appendChild(nameEl);
  
         const descEl = document.createElement('div');
@@ -7768,7 +7950,7 @@ function openSkinsScreen(){
 
           const nameEl = document.createElement('div');
           nameEl.className = 'skinName';
-          nameEl.textContent = `${ab.name} [${ab.keyLabel} / ${ab.gpLabel}]`;
+          nameEl.textContent = `${ab.name} [${keyDisplayName(getKeybind(ab.id))} / ${ab.gpLabel}]`;
           card.appendChild(nameEl);
 
           const descEl = document.createElement('div');
@@ -7959,7 +8141,7 @@ function openSkinsScreen(){
  
         const nameEl = document.createElement('div');
         nameEl.className = 'skinName';
-        nameEl.textContent = `${ab.name} [${ab.keyLabel} / ${ab.gpLabel}]`;
+        nameEl.textContent = `${ab.name} [${keyDisplayName(getKeybind(ab.id))} / ${ab.gpLabel}]`;
         card.appendChild(nameEl);
  
         const descEl = document.createElement('div');
