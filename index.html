@@ -1407,7 +1407,13 @@ const ACTIONS = [
   { id:'heal',                  label:'Emergency Heal',       default:'h' },
   { id:'afterburner',           label:'Afterburner',          default:'0' },
   { id:'spawnbubble_ability',   label:'Spawn Bubble',         default:'1' },
-  { id:'missilecult_ability',   label:'Missile Cult',         default:'2' }
+  { id:'missilecult_ability',   label:'Missile Cult',         default:'2' },
+  { id:'emppulse_ability',      label:'EMP Pulse',            default:'3' },
+  { id:'overcharge_ability',    label:'Overcharge',           default:'4' },
+  { id:'cloak_ability',         label:'Cloak',                default:'5' },
+  { id:'gravitywell_ability',   label:'Gravity Well',         default:'6' },
+  { id:'corruptionpurge_ability', label:'Corruption Purge',   default:'7' },
+  { id:'immunity_ability',      label:'Immunity (Kamikaze)',  default:'8' }
 ];
 function getKeybindsRaw(){
   try { return JSON.parse(localStorage.getItem('uf_keybinds')) || {}; }
@@ -2210,7 +2216,14 @@ const MAX_TICKS_PER_FRAME = 5; // catch-up cap — avoids a spiral of death afte
 let tickAccumulator = 0;
 let lastFrameTime = 0;
 let score = 0, wave = 1;
-let corruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
+let rawCorruptionLevel = 0;  // 0 = clean physics, 1 = full chaos (scales with wave)
+// Corruption Purge ability reads through this instead of the raw value —
+// zeroes out the glitch-wave visuals/camouflage for its duration.
+function corruptionNow(){ return (player.corruptionPurgeT>0) ? 0 : rawCorruptionLevel; }
+// EMP Pulse ability: while >0, every enemy's fire/launch/laser/etc cooldown
+// is frozen (see the `if(empPulseT<=0) e.xCd--;` guards throughout
+// updateEnemies) — enemies just sit there unable to act.
+let empPulseT = 0;
 let frame = 0;
 let shakeT = 0;
 let dyingTimer = 0;
@@ -3736,6 +3749,13 @@ const player = {
   missilePanicT:0, missilePanicCd:0, missilePanicIdx:0,
   shieldAbilityCd:0, missilePanicAbilityCd:0, commsJamT:0, commsJamAbilityCd:0, emergencyHealCd:0,
   spawnBubbleCd:0, missileCultCd:0,
+  // ---- New abilities: EMP Pulse, Overcharge, Cloak, Gravity Well, Corruption Purge, Immunity ----
+  empPulseAbilityCd:0,
+  overchargeT:0, overchargeAbilityCd:0,
+  cloakT:0, cloakAbilityCd:0,
+  gravityWellT:0, gravityWellAbilityCd:0, gravityWellX:0, gravityWellY:0,
+  corruptionPurgeT:0, corruptionPurgeAbilityCd:0,
+  immuneT:0, immuneAbilityCd:0,
   nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0, onFireT:0, onFireDmgTick:0,
   // ---- Distance-traveled + Afterburner ability (key 0) ----
   distance:0, afterburnerActive:false,
@@ -3748,6 +3768,7 @@ const AFTERBURNER_MIN_TO_ACTIVATE = 8; // can't re-engage on fumes — avoids fl
 const DISTANCE_PER_SPEED_UNIT = 0.12; // tuning knob for how fast the DISTANCE stat climbs
  
 function damagePlayer(amount){
+  if(player.immuneT>0) return false;
   if(player.shieldT>0) return false;
   player.hp -= amount * currentDifficulty.dmgMult;
   return true;
@@ -4366,6 +4387,18 @@ function updatePowerupTimers(){
   if(player.emergencyHealCd>0) player.emergencyHealCd--;
   if(player.spawnBubbleCd>0) player.spawnBubbleCd--;
   if(player.missileCultCd>0) player.missileCultCd--;
+  if(empPulseT>0) empPulseT--;
+  if(player.empPulseAbilityCd>0) player.empPulseAbilityCd--;
+  if(player.overchargeT>0) player.overchargeT--;
+  if(player.overchargeAbilityCd>0) player.overchargeAbilityCd--;
+  if(player.cloakT>0) player.cloakT--;
+  if(player.cloakAbilityCd>0) player.cloakAbilityCd--;
+  if(player.gravityWellT>0) player.gravityWellT--;
+  if(player.gravityWellAbilityCd>0) player.gravityWellAbilityCd--;
+  if(player.corruptionPurgeT>0) player.corruptionPurgeT--;
+  if(player.corruptionPurgeAbilityCd>0) player.corruptionPurgeAbilityCd--;
+  if(player.immuneT>0) player.immuneT--;
+  if(player.immuneAbilityCd>0) player.immuneAbilityCd--;
   if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
@@ -4398,7 +4431,13 @@ const BUFF_LABELS = {
   missilepanic: ['MISSILE PANIC', '#ff3d5c'],
   commsjam:     ['ENEMY COMMS JAMMED', '#b388ff'],
   widerange:    ['WIDE RANGE', '#3dffb3'],
-  firerate:     ['FIRE RATE+', '#ff6b3d']
+  firerate:     ['FIRE RATE+', '#ff6b3d'],
+  emppulse:     ['EMP PULSE', '#7cf9ff'],
+  overcharge:   ['OVERCHARGE', '#ff5c5c'],
+  cloak:        ['CLOAKED', '#8888ff'],
+  gravitywell:  ['GRAVITY WELL', '#b388ff'],
+  corruptpurge: ['CORRUPTION PURGED', '#5cff8a'],
+  immune:       ['IMMUNE — KAMIKAZE x4', '#fffb5c']
 };
 function drawBuffHud(){
   const active = [];
@@ -4410,6 +4449,12 @@ function drawBuffHud(){
   if(player.commsJamT>0) active.push(['commsjam', player.commsJamT]);
   if(player.wideRangeT>0) active.push(['widerange', player.wideRangeT]);
   if(player.fireRateT>0) active.push(['firerate', player.fireRateT]);
+  if(empPulseT>0) active.push(['emppulse', empPulseT]);
+  if(player.overchargeT>0) active.push(['overcharge', player.overchargeT]);
+  if(player.cloakT>0) active.push(['cloak', player.cloakT]);
+  if(player.gravityWellT>0) active.push(['gravitywell', player.gravityWellT]);
+  if(player.corruptionPurgeT>0) active.push(['corruptpurge', player.corruptionPurgeT]);
+  if(player.immuneT>0) active.push(['immune', player.immuneT]);
   if(!active.length) return;
   ctx.save();
   ctx.font = '11px "Courier New", monospace';
@@ -4562,7 +4607,7 @@ function startWave(w){
   spawnQueue = waveComposition(w).sort(()=>Math.random()-0.5);
   spawnTimer = 0;
   // CORRUPTION: starts at wave 192, fully corrupted by wave 256
-  corruptionLevel = (w < 192 || w >= 314) ? 0 : Math.min(1, (w - 192) / (256 - 192));
+  rawCorruptionLevel = (w < 192 || w >= 314) ? 0 : Math.min(1, (w - 192) / (256 - 192));
   // NUKE: earn one charge every 50 waves survived
   if(w % 50 === 0 && w > player.nukeAwardedAt){
     player.nukeAwardedAt = w;
@@ -4581,6 +4626,7 @@ function tryFireGun(){
   if(player.fireCd>0) return;
   let cd = player.rapidFireT>0 ? 4 : 8;
   if(player.fireRateT>0) cd = Math.max(1, Math.round(cd*0.875)); // +12.5% fire rate (power-up)
+  if(player.overchargeT>0) cd = Math.max(1, Math.round(cd*0.55)); // Overcharge ability — big fire-rate spike
   cd = Math.max(1, Math.round(cd * (1 - getUpgradeBonus('upg_firerate') - getPerkBonus('firerate')))); // permanent upgrade + temp limited-item perk, stacks
   player.fireCd = cd;
   SFX.shoot();
@@ -4789,6 +4835,59 @@ function updatePlayer(){
       SFX.missileLaunch();
     }
   }
+
+  // ---- EMP Pulse [key 3] — freezes every enemy's cooldowns for 5s. Cooldown 35s ----
+  if(keys[getKeybind('emppulse_ability')] && hasAbility('emppulse_ability') && player.empPulseAbilityCd<=0 && gameMode !== 'solar'){
+    empPulseT = 300; // 5s
+    player.empPulseAbilityCd = 2100; // 35s cooldown
+    spawnParticles(player.x, player.y, '#7cf9ff', 26, 5, 5);
+    shakeT = Math.max(shakeT, 6);
+    SFX.commsJam();
+  }
+
+  // ---- Overcharge [key 4] — 8s fire-rate + damage spike on the gun. Cooldown 40s ----
+  if(keys[getKeybind('overcharge_ability')] && hasAbility('overcharge_ability') && player.overchargeAbilityCd<=0 && gameMode !== 'solar'){
+    player.overchargeT = 480; // 8s
+    player.overchargeAbilityCd = 2400; // 40s cooldown
+    spawnParticles(player.x, player.y, '#ff5c5c', 20, 4, 4);
+    SFX.uiClick();
+  }
+
+  // ---- Cloak [key 5] — 4s of lost enemy lock + wild aim. Cooldown 45s ----
+  if(keys[getKeybind('cloak_ability')] && hasAbility('cloak_ability') && player.cloakAbilityCd<=0 && gameMode !== 'solar'){
+    player.cloakT = 240; // 4s
+    player.cloakAbilityCd = 2700; // 45s cooldown
+    spawnParticles(player.x, player.y, '#8888ff', 20, 4, 4);
+    SFX.commsJam();
+  }
+
+  // ---- Gravity Well [key 6] — pulls nearby enemies/projectiles together for 3s. Cooldown 50s ----
+  if(keys[getKeybind('gravitywell_ability')] && hasAbility('gravitywell_ability') && player.gravityWellAbilityCd<=0 && gameMode !== 'solar'){
+    player.gravityWellT = 180; // 3s
+    player.gravityWellX = player.x;
+    player.gravityWellY = Math.max(140, player.y - 160); // pull point out ahead of the ship
+    player.gravityWellAbilityCd = 3000; // 50s cooldown
+    spawnParticles(player.gravityWellX, player.gravityWellY, '#b388ff', 30, 6, 6);
+    SFX.uiClick();
+  }
+
+  // ---- Corruption Purge [key 7] — zeroes the glitch-wave corruption for 10s. Cooldown 30s ----
+  // Only fires on an actually-corrupted wave — no point spending the cooldown on nothing.
+  if(keys[getKeybind('corruptionpurge_ability')] && hasAbility('corruptionpurge_ability') && player.corruptionPurgeAbilityCd<=0 && rawCorruptionLevel>0 && gameMode !== 'solar'){
+    player.corruptionPurgeT = 600; // 10s
+    player.corruptionPurgeAbilityCd = 1800; // 30s cooldown
+    spawnParticles(player.x, player.y, '#5cff8a', 24, 5, 4);
+    SFX.uiClick();
+  }
+
+  // ---- Immunity [key 8] — 30s total invulnerability + kamikaze instant-kills + 4x score/coins. Cooldown 5 min ----
+  if(keys[getKeybind('immunity_ability')] && hasAbility('immunity_ability') && player.immuneAbilityCd<=0 && gameMode !== 'solar'){
+    player.immuneT = 1800; // 30s
+    player.immuneAbilityCd = 18000; // 5 min cooldown
+    spawnParticles(player.x, player.y, '#fffb5c', 32, 6, 6);
+    shakeT = Math.max(shakeT, 10);
+    SFX.shieldActivate();
+  }
  
   if(missileHeld && player.missilePanicT<=0){
     if(!player.lockTarget || !player.lockTarget.alive){
@@ -4849,8 +4948,8 @@ function updateMissiles(){
           m.x+=m.vx; m.y+=m.vy;
           return m.x>-40 && m.x<W+40 && m.y>-40 && m.y<H+40;
         }
-      } else if(player.commsJamT>0 && !m.heatseeking){
-        // comms jammed — lost lock on the player, mistakes another enemy as its target
+      } else if((player.commsJamT>0 || player.cloakT>0) && !m.heatseeking){
+        // comms jammed / player cloaked — lost lock on the player, mistakes another enemy as its target
         if(!m.jamTarget || !m.jamTarget.alive || frame % 45 === 0){
           const candidates = enemies.filter(en=>en.alive);
           m.jamTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
@@ -4896,6 +4995,39 @@ function updateMissiles(){
 function updateFlares(){
   flares = flares.filter(f=>{ f.life--; return f.life>0; });
 }
+
+// Gravity Well ability — drags nearby enemies + enemy projectiles toward the
+// cast point while active. Doesn't damage anything itself; it's a setup tool
+// for bunching enemies up before a nuke/missile cult/gun pass.
+const GRAVITY_WELL_RADIUS = 260;
+const GRAVITY_WELL_PULL = 0.035;
+function applyGravityWell(){
+  if(player.gravityWellT<=0) return;
+  const wx = player.gravityWellX, wy = player.gravityWellY;
+  for(const e of enemies){
+    if(!e.alive) continue;
+    const d = Math.hypot(e.x-wx, e.y-wy);
+    if(d < GRAVITY_WELL_RADIUS && d > 4){
+      e.x += (wx-e.x)*GRAVITY_WELL_PULL;
+      e.y += (wy-e.y)*GRAVITY_WELL_PULL;
+    }
+  }
+  for(const b of enemyBullets){
+    const d = Math.hypot(b.x-wx, b.y-wy);
+    if(d < GRAVITY_WELL_RADIUS && d > 4){
+      b.x += (wx-b.x)*GRAVITY_WELL_PULL;
+      b.y += (wy-b.y)*GRAVITY_WELL_PULL;
+    }
+  }
+  for(const m of missiles){
+    if(m.side!=='enemy') continue;
+    const d = Math.hypot(m.x-wx, m.y-wy);
+    if(d < GRAVITY_WELL_RADIUS && d > 4){
+      m.x += (wx-m.x)*GRAVITY_WELL_PULL;
+      m.y += (wy-m.y)*GRAVITY_WELL_PULL;
+    }
+  }
+}
  
 function updateBombs(){
   bombs = bombs.filter(b=>{
@@ -4937,7 +5069,7 @@ function updateEnemies(){
     if(e.type==='ufo'){
       e.x += Math.sin(e.phase)*2.4;
       if(e.y<100) e.y += e.speed;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(50,90);
         SFX.enemyShoot();
@@ -4950,14 +5082,14 @@ function updateEnemies(){
       const dx = player.x-e.x;
       e.x += clamp(dx,-e.speed,e.speed);
       if(e.y < 140+Math.sin(e.phase)*30) e.y += e.speed;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(40,70);
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
       }
-      e.missileCd--;
+      if(empPulseT<=0) e.missileCd--;
       if(e.missileCd<=0){
         e.missileCd = rand(200,320);
         SFX.missileLaunch();
@@ -4967,7 +5099,7 @@ function updateEnemies(){
     else if(e.type==='bomber'){
       if(e.y<90) e.y+=e.speed;
       e.x += Math.sin(e.phase*0.6)*0.8;
-      e.bombCd--;
+      if(empPulseT<=0) e.bombCd--;
       if(e.bombCd<=0){
         e.bombCd = rand(100,170);
         SFX.bombDrop();
@@ -4977,7 +5109,7 @@ function updateEnemies(){
     else if(e.type==='spaceship'){
       if(e.y<80) e.y+=e.speed;
       e.x += Math.sin(e.phase*0.4)*1.2;
-      e.laserCd--;
+      if(empPulseT<=0) e.laserCd--;
       if(e.laserCd<=0){
         e.laserT = 40;
         e.laserCd = 220;
@@ -4993,7 +5125,7 @@ function updateEnemies(){
     else if(e.type==='carrier'){
       if(e.y<90) e.y+=e.speed;
       e.x += Math.sin(e.phase*0.3)*0.9;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(140,190);
         SFX.missileLaunch();
@@ -5004,7 +5136,7 @@ function updateEnemies(){
           }, false));
         }
       }
-      e.launchCd--;
+      if(empPulseT<=0) e.launchCd--;
       if(e.launchCd<=0 && enemies.length<40){
         e.launchCd = rand(180,260);
         SFX.bombDrop();
@@ -5019,7 +5151,7 @@ function updateEnemies(){
       if(!e.diving && e.y>120) e.diving = Math.random()<0.02;
       if(e.diving){
         let tgt = player;
-        if(player.commsJamT>0){
+        if(player.commsJamT>0 || player.cloakT>0){
           if(!e.confusedTarget || !e.confusedTarget.alive || frame % 50 === 0){
             const candidates = enemies.filter(en=>en.alive && en!==e);
             e.confusedTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
@@ -5038,8 +5170,14 @@ function updateEnemies(){
       if(dist(e,player) < 26){
         e.alive=false; e.hp=0;
         explodeEnemy(e); shakeT=8;
-        if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
-      } else if(player.commsJamT>0 && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
+        if(player.immuneT>0){
+          // kamikaze immunity — ramming it yourself is now a kill, not a hit
+          addScore(e.scoreVal);
+          maybeDropPowerup(e);
+          awardKillCoins(e);
+          SFX.explosionSmall();
+        } else if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
+      } else if((player.commsJamT>0 || player.cloakT>0) && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
         // confused kamikaze into another enemy — friendly fire, no score
         const targetDead = damageEnemy(e.confusedTarget, 20);
         e.alive=false; e.hp=0;
@@ -5053,11 +5191,11 @@ function updateEnemies(){
     else if(e.type==='sentinel'){
       if(e.y<150) e.y += e.speed;
       e.x += Math.sin(e.phase*0.35)*0.7;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(70,110);
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*3.2,vy:Math.sin(ang)*3.2,w:5,h:5,side:'enemy'});
       }
     }
@@ -5065,11 +5203,11 @@ function updateEnemies(){
       // slow drifting harasser — single potshots, half the punch of a player bullet
       if(e.y<160) e.y += e.speed;
       e.x += Math.sin(e.phase*0.5)*1.1;
-      e.gunCd--;
+      if(empPulseT<=0) e.gunCd--;
       if(e.gunCd<=0){
         e.gunCd = 150; // fires every 2.5s @ 60fps
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:4,h:4,side:'enemy',dmg:4});
       }
     }
@@ -5078,7 +5216,7 @@ function updateEnemies(){
       // missile and launches an interceptor to snipe it out of the air.
       if(e.y<180) e.y += e.speed;
       e.x += Math.sin(e.phase*0.3)*0.9;
-      e.interceptCd--;
+      if(empPulseT<=0) e.interceptCd--;
       if(e.interceptCd<=0){
         const target = missiles.find(m => m.side==='player' && !m.dead);
         if(target){
@@ -5097,7 +5235,7 @@ function updateEnemies(){
       // Same HP as a Fighter, but far slower and only lobs one missile at a time
       if(e.y<170) e.y += e.speed;
       e.x += Math.sin(e.phase*0.25)*0.6;
-      e.missileCd--;
+      if(empPulseT<=0) e.missileCd--;
       if(e.missileCd<=0){
         e.missileCd = 450; // ~7.5s @ 60fps
         SFX.missileLaunch();
@@ -5109,7 +5247,7 @@ function updateEnemies(){
       // any player powerup currently running, if the player is in range.
       if(e.y<200) e.y += e.speed*0.7;
       e.x += Math.sin(e.phase*1.2)*2;
-      e.empCd--;
+      if(empPulseT<=0) e.empCd--;
       if(e.empCd<=0){
         e.empCd = rand(150,240);
         if(Math.abs(e.x-player.x) < 64 && Math.abs(e.y-player.y) < 64){
@@ -5129,11 +5267,11 @@ function updateEnemies(){
       // Sniper boss: slow drift, precise 2-bullet burst + 1 heat-seeking missile
       if(e.y<130) e.y += e.speed;
       e.x += Math.sin(e.phase*0.25)*1.4;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(90,130);
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         // precise sniper burst — 2 bullets, tight spread, fast
         for(let i=-1;i<=1;i+=2){
           const spread = i*0.05;
@@ -5154,11 +5292,11 @@ function updateEnemies(){
       // Bandkanon-style boss: absurdly fast fire rate, minimal movement
       if(e.y<130) e.y += e.speed;
       e.x += Math.sin(e.phase*0.2)*1.0;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = 8;  // Bandkanon 1 fire rate
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x) + rand(-0.15,0.15);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0)) + rand(-0.15,0.15);
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
       }
     }
@@ -5166,7 +5304,7 @@ function updateEnemies(){
       // 2.5x carrier — same launch pattern, tripled beam damage/duration
       if(e.y<100) e.y+=e.speed;
       e.x += Math.sin(e.phase*0.25)*0.7;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(130,180);
         SFX.missileLaunch();
@@ -5177,7 +5315,7 @@ function updateEnemies(){
           }, false));
         }
       }
-      e.launchCd--;
+      if(empPulseT<=0) e.launchCd--;
       if(e.launchCd<=0 && enemies.length<40){
         e.launchCd = rand(160,230);
         SFX.bombDrop();
@@ -5187,7 +5325,7 @@ function updateEnemies(){
           fireCd:rand(30,90), angle:Math.PI/2, phase:rand(0,Math.PI*2), diving:false
         });
       }
-      e.laserCd--;
+      if(empPulseT<=0) e.laserCd--;
       if(e.laserCd<=0){
         e.laserT = 40;
         e.laserCd = 200;
@@ -5204,11 +5342,11 @@ function updateEnemies(){
       // Heavily upgraded Sentinel — same pattern, hits harder & more often
       if(e.y<150) e.y += e.speed;
       e.x += Math.sin(e.phase*0.35)*0.7;
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = rand(45,80);
         SFX.enemyShoot();
-        const ang = Math.atan2(player.y-e.y, player.x-e.x);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:6,h:6,side:'enemy'});
       }
     }
@@ -5218,11 +5356,11 @@ function updateEnemies(){
       e.x += Math.sin(e.phase*0.15)*0.5;
 
       // Bullet barrage — 8 bullets in a fan
-      e.fireCd--;
+      if(empPulseT<=0) e.fireCd--;
       if(e.fireCd<=0){
         e.fireCd = 15;
         SFX.enemyShoot();
-        const baseAng = Math.atan2(player.y-e.y, player.x-e.x);
+        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         for(let i=0;i<8;i++){
           const spread = (i-3.5) * 0.09;
           enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*4.5,vy:Math.sin(baseAng+spread)*4.5,w:5,h:5,side:'enemy'});
@@ -5246,7 +5384,7 @@ function updateEnemies(){
       }
 
       // Dual beams
-      e.laserCd--;
+      if(empPulseT<=0) e.laserCd--;
       if(e.laserCd<=0){
         e.laserT = 50;
         e.laserCd = 180;
@@ -5265,17 +5403,17 @@ function updateEnemies(){
       // "Golden Pins" — alternating golden bullet bursts and golden homing missiles
       if(e.y<150) e.y += e.speed;
       e.x += Math.sin(e.phase*0.3)*1.1;
-      e.pinCd--;
+      if(empPulseT<=0) e.pinCd--;
       if(e.pinCd<=0){
         e.pinCd = rand(60,100);
         SFX.enemyShoot();
-        const baseAng = Math.atan2(player.y-e.y, player.x-e.x);
+        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
         for(let i=-1;i<=1;i++){
           const spread = i*0.12;
           enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*5.5,vy:Math.sin(baseAng+spread)*5.5,w:4,h:4,side:'enemy',golden:true});
         }
       }
-      e.pinMissileCd--;
+      if(empPulseT<=0) e.pinMissileCd--;
       if(e.pinMissileCd<=0){
         e.pinMissileCd = rand(180,260);
         SFX.missileLaunch();
@@ -5296,7 +5434,7 @@ function circleHit(a,b,ra,rb){ return dist(a,b) < ra+rb; }
  
 // Run kill multiplier: +0.1x per 100 kills this run. Persists through a
 // second-chance revive (killsThisRun only resets in resetGame), resets on death.
-function getKillMult(){ return (1 + Math.floor(killsThisRun/100)*0.1) * (1 + getPerkBonus('coinmult')); }
+function getKillMult(){ return (1 + Math.floor(killsThisRun/100)*0.1) * (1 + getPerkBonus('coinmult')) * (player.immuneT>0 ? 4 : 1); }
  
 function addScore(amount){
   killsThisRun++;
@@ -5342,7 +5480,7 @@ function updateCollisions(){
     for(const e of enemies){
       if(!e.alive) continue;
       if(circleHit(b,e,4,e.w/2)){
-        const dead = damageEnemy(e, 8);
+        const dead = damageEnemy(e, player.overchargeT>0 ? 16 : 8);
         b.dead = true;
         spawnParticles(b.x,b.y,'#4cf',5,2);
         SFX.hit();
@@ -5537,6 +5675,25 @@ function updateCollisions(){
   missiles = missiles.filter(m=>!m.dead);
  
   // drone collision handled in updateEnemies
+
+  // Immunity ability: plow straight through every enemy body for an instant,
+  // no-HP-check kill — the whole point of "kamikaze into literally everything".
+  // Player takes zero damage from any of this (see damagePlayer()).
+  if(player.immuneT>0){
+    for(const e of enemies){
+      if(!e.alive) continue;
+      if(circleHit(player,e,16,e.w/2)){
+        e.alive=false; e.hp=0;
+        addScore(e.scoreVal);
+        explodeEnemy(e);
+        maybeDropPowerup(e);
+        awardKillCoins(e);
+        if(e.type==='blimp') spawnBlimpGas(e);
+        shakeT = Math.max(shakeT, 6);
+        SFX.explosionSmall();
+      }
+    }
+  }
 }
  
 function updateParticles(){
@@ -5607,8 +5764,8 @@ function drawPlayer(){
   
   // CORRUPTION: player also glitches with color inversion (skipped entirely
   // in reduced-glitch mode — photosensitivity setting)
-  if(corruptionLevel > 0.5 && !getReduceGlitchPref()){
-    ctx.filter = `invert(${corruptionLevel * 50}%)`;
+  if(corruptionNow() > 0.5 && !getReduceGlitchPref()){
+    ctx.filter = `invert(${corruptionNow() * 50}%)`;
   }
   
   const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']||(Math.abs(touchMove.x)>0.05||Math.abs(touchMove.y)>0.05);
@@ -5651,9 +5808,9 @@ function drawEnemy(e){
   
   // CORRUPTION: invert colors of some enemies at high corruption (disabled
   // in reduced-glitch mode — photosensitivity setting)
-  const shouldInvert = corruptionLevel > 0.3 && !getReduceGlitchPref() && Math.sin(frame * 0.05 + e.phase) > 0;
+  const shouldInvert = corruptionNow() > 0.3 && !getReduceGlitchPref() && Math.sin(frame * 0.05 + e.phase) > 0;
   if(shouldInvert){
-    ctx.filter = `invert(${corruptionLevel * 100}%)`;
+    ctx.filter = `invert(${corruptionNow() * 100}%)`;
   }
   
   const skinList = ENEMY_SKINS[e.type];
@@ -6003,18 +6160,18 @@ function drawStars(){
 }
  
 function renderCorruptionEffects(){
-  if(corruptionLevel <= 0) return;
+  if(corruptionNow() <= 0) return;
   // Photosensitivity setting: skip all flicker/inversion/aberration overlays.
   if(getReduceGlitchPref()) return;
   ctx.save();
   
   // Color inversion zones (stronger at higher corruption)
-  if(corruptionLevel > 0.1){
-    ctx.globalAlpha = corruptionLevel * 0.12;
+  if(corruptionNow() > 0.1){
+    ctx.globalAlpha = corruptionNow() * 0.12;
     ctx.globalCompositeOperation = 'screen';  // inverted blend mode
     
     // Invert random sections of the screen
-    for(let i = 0; i < corruptionLevel * 6; i++){
+    for(let i = 0; i < corruptionNow() * 6; i++){
       const invX = Math.floor(Math.random() * (W / 60)) * 60;
       const invY = Math.floor(Math.random() * (H / 60)) * 60;
       const invW = 60 + Math.random() * 80;
@@ -6026,26 +6183,26 @@ function renderCorruptionEffects(){
   }
   
   // Chromatic aberration (color shift)
-  const aberration = corruptionLevel * 3;
-  ctx.globalAlpha = corruptionLevel * 0.08;
+  const aberration = corruptionNow() * 3;
+  ctx.globalAlpha = corruptionNow() * 0.08;
   ctx.fillStyle = '#ff00ff';
   ctx.fillRect(-aberration, 0, W+aberration*2, H);
   ctx.fillStyle = '#00ffff';
   ctx.fillRect(aberration, 0, W-aberration*2, H);
   
   // Scanline flicker
-  ctx.globalAlpha = corruptionLevel * 0.15;
+  ctx.globalAlpha = corruptionNow() * 0.15;
   for(let i = 0; i < H; i += 6){
-    if(Math.random() < corruptionLevel * 0.4){
+    if(Math.random() < corruptionNow() * 0.4){
       ctx.fillStyle = `rgba(255, 100, 255, ${Math.random() * 0.3})`;
       ctx.fillRect(0, i, W, 2);
     }
   }
   
   // Random pixel glitch blocks
-  if(corruptionLevel > 0.4){
-    ctx.globalAlpha = corruptionLevel * 0.1;
-    for(let i = 0; i < corruptionLevel * 8; i++){
+  if(corruptionNow() > 0.4){
+    ctx.globalAlpha = corruptionNow() * 0.1;
+    for(let i = 0; i < corruptionNow() * 8; i++){
       const gx = Math.floor(Math.random() * (W / 40)) * 40;
       const gy = Math.floor(Math.random() * (H / 40)) * 40;
       ctx.fillStyle = Math.random() > 0.5 ? '#ff00ff' : '#00ffff';
@@ -6280,6 +6437,7 @@ function tick(){
   updateAllies();
   updateGasClouds();
   updatePlayerFire();
+  applyGravityWell();
   updateCollisions();
   updatePowerups();
   if(godMode) player.hp = player.maxHp;
@@ -6353,6 +6511,13 @@ async function resetGame(theme){
   player.missilePanicT=0; player.missilePanicCd=0; player.missilePanicIdx=0;
   player.shieldAbilityCd=0; player.missilePanicAbilityCd=0; player.commsJamT=0; player.commsJamAbilityCd=0; player.emergencyHealCd=0;
   player.spawnBubbleCd=0; player.missileCultCd=0;
+  player.empPulseAbilityCd=0;
+  player.overchargeT=0; player.overchargeAbilityCd=0;
+  player.cloakT=0; player.cloakAbilityCd=0;
+  player.gravityWellT=0; player.gravityWellAbilityCd=0;
+  player.corruptionPurgeT=0; player.corruptionPurgeAbilityCd=0;
+  player.immuneT=0; player.immuneAbilityCd=0;
+  empPulseT=0;
   player.nukeCharges=0; player.nukeCd=0; player.nukeAwardedAt=0; player.empT=0;
   player.onFireT=0; player.onFireDmgTick=0;
   player.distance=0; player.afterburnerActive=false; player.afterburnerFuel=player.afterburnerMaxFuel;
@@ -7037,7 +7202,13 @@ const ABILITY_DEFS = [
   { id:'commsjam_ability', name:'Comms Jam', desc:'On-demand 20s enemy comms jam — missiles and drones turn on each other. Cooldown 50s.', costType:'coins', cost:450, keyLabel:'V', gpLabel:'LB', color:'#b388ff' },
   { id:'backup_ability', name:'Call Backup', desc:'Calls in 4 fighter escorts (75 HP each). Usable again once your squad is wiped.', costType:'cash', cost:20, keyLabel:'B', gpLabel:'LT', color:'#4ecdc4' },
   { id:'spawnbubble_ability', name:'Spawn Bubble', desc:'Instantly drops a random consumable at your position. Cooldown 15–45s (random each use).', costType:'coins', cost:300, keyLabel:'1', gpLabel:'↓', color:'#ffe066' },
-  { id:'missilecult_ability', name:'Missile Cult', desc:'Unleashes 5 homing missiles that each lock onto separate targets. Cooldown 90s.', costType:'cash', cost:18, keyLabel:'2', gpLabel:'←', color:'#ff6b3d' }
+  { id:'missilecult_ability', name:'Missile Cult', desc:'Unleashes 5 homing missiles that each lock onto separate targets. Cooldown 90s.', costType:'cash', cost:18, keyLabel:'2', gpLabel:'←', color:'#ff6b3d' },
+  { id:'emppulse_ability', name:'EMP Pulse', desc:'Freezes every enemy on screen — no shooting, no missiles, no launches — for 5s. Cooldown 35s.', costType:'coins', cost:380, keyLabel:'3', gpLabel:'—', color:'#7cf9ff' },
+  { id:'overcharge_ability', name:'Overcharge', desc:'8s gun overcharge — big fire-rate spike and 2x bullet damage. Cooldown 40s.', costType:'coins', cost:400, keyLabel:'4', gpLabel:'—', color:'#ff5c5c' },
+  { id:'cloak_ability', name:'Cloak', desc:'4s of going dark — missiles and drones lose lock, gunners fire wild. Cooldown 45s.', costType:'coins', cost:420, keyLabel:'5', gpLabel:'—', color:'#8888ff' },
+  { id:'gravitywell_ability', name:'Gravity Well', desc:'Drags nearby enemies, bullets and missiles toward one point for 3s — great before a nuke or missile cult. Cooldown 50s.', costType:'cash', cost:16, keyLabel:'6', gpLabel:'—', color:'#b388ff' },
+  { id:'corruptionpurge_ability', name:'Corruption Purge', desc:'Zeroes out the high-wave glitch corruption (visuals + enemy camouflage) for 10s. Only does anything on corrupted waves. Cooldown 30s.', costType:'coins', cost:350, keyLabel:'7', gpLabel:'—', color:'#5cff8a' },
+  { id:'immunity_ability', name:'Immunity', desc:'30s of total invulnerability — ram straight through every enemy for an instant kill, and every kill (however you get it) pays out 4x score and coins. Cooldown 5 min.', costType:'cash', cost:35, keyLabel:'8', gpLabel:'—', color:'#fffb5c' }
 ];
  
 // ---------- Black Market ----------
