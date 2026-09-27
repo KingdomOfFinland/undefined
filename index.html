@@ -22,6 +22,15 @@
     overscroll-behavior:none; touch-action:none;
   }
   #wrap { position:relative; }
+  /* Fill mode: #wrap is pinned to the actual viewport size (so #hud etc.
+     stay anchored to the real screen edges) and clips the canvas, which is
+     centered inside it and allowed to overflow past the normal 100vw/100vh
+     cap so it can crop instead of letterboxing. */
+  body.fill-mode #wrap { width:100vw; height:100dvh; overflow:hidden; }
+  body.fill-mode canvas {
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    max-width:none; max-height:none; border:none; box-shadow:none;
+  }
   canvas {
     background:radial-gradient(ellipse at 50% 30%, #0a1428 0%, #05060a 70%);
     border:2px solid var(--accent-border); box-shadow:0 0 30px var(--accent-glow);
@@ -1100,11 +1109,23 @@ const RES_SCALE_STEPS = [
 function getResScalePref(){ return localStorage.getItem('uf_resscale') || '100'; }
 function setResScalePref(id){ localStorage.setItem('uf_resscale', id); }
 function getResScaleDef(id){ return RES_SCALE_STEPS.find(s => s.id===id) || RES_SCALE_STEPS[3]; }
+// Display mode: 'fit' (default) shows the whole 1366x768 world, letterboxed
+// with black bars when the screen's aspect ratio doesn't match. 'fill' crops
+// instead of letterboxing — no bars, nothing stretched, just the extra
+// length off one axis trimmed so the world fills the screen edge-to-edge.
+function getDisplayModePref(){ return localStorage.getItem('uf_displaymode') || 'fit'; }
+function setDisplayModePref(id){ localStorage.setItem('uf_displaymode', id); }
 let renderScale = 1;
 function fitCanvasToScreen(){
+  const mode = getDisplayModePref();
+  document.body.classList.toggle('fill-mode', mode === 'fill');
   const availW = window.innerWidth;
   const availH = window.innerHeight;
-  const cssScale = Math.max(0.1, Math.min(availW / W, availH / H));
+  // 'fit' = Math.min → whole world visible, may letterbox.
+  // 'fill' = Math.max → world overflows one axis, cropped instead of barred.
+  const cssScale = mode === 'fill'
+    ? Math.max(availW / W, availH / H)
+    : Math.max(0.1, Math.min(availW / W, availH / H));
   const dpr = window.devicePixelRatio || 1;
   const resMult = getResScaleDef(getResScalePref()).mult;
   renderScale = cssScale * dpr * resMult;
@@ -1586,6 +1607,13 @@ function updateResScaleBtnLabel(){
   if(!btn) return;
   btn.textContent = `🖥 Resolution: ${getResScaleDef(getResScalePref()).label}`;
 }
+function updateDisplayModeBtnLabel(){
+  const btn = document.getElementById('displayModeBtn');
+  if(!btn) return;
+  btn.textContent = getDisplayModePref() === 'fill'
+    ? '🖼 Display: FILL (no bars, slight crop)'
+    : '🖼 Display: FIT (bars)';
+}
 
 // Difficulty — locked in for the run at LAUNCH, not changeable mid-run.
 const DIFFICULTIES = [
@@ -1748,6 +1776,16 @@ function wireSettingsButtons(){
     };
   }
   updateResScaleBtnLabel();
+  const displayModeBtn = document.getElementById('displayModeBtn');
+  if(displayModeBtn){
+    displayModeBtn.onclick = () => {
+      SFX.uiClick();
+      setDisplayModePref(getDisplayModePref() === 'fit' ? 'fill' : 'fit');
+      updateDisplayModeBtnLabel();
+      fitCanvasToScreen();
+    };
+  }
+  updateDisplayModeBtnLabel();
   updateDifficultyBtnLabel();
   const difficultyBtn = document.getElementById('difficultyBtn');
   if(difficultyBtn){
@@ -1836,6 +1874,7 @@ function openSettingsModal(){
       <button id="touchToggleBtn" style="width:100%; margin-bottom:10px;">📱 Touch Controls: AUTO</button>
       <button id="btnSizeBtn" style="width:100%; margin-bottom:10px;">🔘 Button Size: NORMAL</button>
       <button id="resScaleBtn" style="width:100%; margin-bottom:10px;">🖥 Resolution: 100%</button>
+      <button id="displayModeBtn" style="width:100%; margin-bottom:10px;">🖼 Display: FIT (bars)</button>
       <button id="difficultyBtn" style="width:100%; margin-bottom:10px;">⚔ Difficulty: NORMAL</button>
       <button id="glitchToggleBtn" style="width:100%; margin-bottom:6px;">🌀 Glitch Effects: ON</button>
       <div style="font-size:9px; color:#789; margin-bottom:10px; text-align:left;">Turns off screen-inversion/flicker visuals from high-corruption waves. Recommended if you're sensitive to flashing effects.</div>
@@ -4144,6 +4183,7 @@ let bullets = [];      // player guns
 let enemyBullets = [];
 let missiles = [];      // homing missiles (player + enemy), tagged .side
 let enemies = [];
+let portals = []; // falling dimension portals (date-triggered feature, see DIMENSION PORTALS section)
 let flares = [];
 let particles = [];
 let bombs = [];
@@ -4614,6 +4654,8 @@ function startWave(w){
     player.nukeCharges = (player.nukeCharges||0) + 1;
     document.getElementById('nukecount').textContent = player.nukeCharges;
   }
+  // DIMENSION PORTAL: every 25 waves, but only within the New Year window
+  maybeSpawnPortal(w);
   SFX.waveStart();
   const el = document.getElementById('wavecall');
   el.textContent = `WAVE ${w} INCOMING`;
@@ -6150,12 +6192,161 @@ function drawPlanetOverlay(){
   ctx.restore();
 }
 
+// ============================================================
+// DIMENSION PORTALS + SEASONAL THEME (date-triggered feature)
+// ============================================================
+// Falling portals spawn every 25 waves, but ONLY while we're within
+// 2 weeks before/after New Year's Eve. Flying into one moves the
+// player to a random dimension; they stay there until the next
+// portal spawns and moves them again (or back to normal).
+
+const DIMENSIONS = ['normal','nether','the-end','deep-space','earth','icy-space'];
+const DIMENSION_STYLE = {
+  'nether':      { glow:'#ff4d1a', tint:'rgba(120,20,0,0.28)', label:'☠ Nether' },
+  'the-end':     { glow:'#b388ff', tint:'rgba(30,10,45,0.32)', label:'◆ The End' },
+  'deep-space':  { glow:'#5ecbff', tint:'rgba(4,4,20,0.30)',   label:'✦ Deep Space' },
+  'earth':       { glow:'#5cff8a', tint:'rgba(10,40,15,0.20)', label:'🌍 Earth' },
+  'icy-space':   { glow:'#aeefff', tint:'rgba(180,230,255,0.18)', label:'❄ Icy Space' },
+};
+let dimensionState = { current:'normal' };
+
+function isPortalWindow(date = new Date()){
+  const year = date.getFullYear();
+  const nyeYear = date.getMonth() === 0 ? year - 1 : year;
+  const nye = new Date(nyeYear, 11, 31);
+  const start = new Date(nye); start.setDate(start.getDate() - 14);
+  const end = new Date(nye); end.setDate(end.getDate() + 14);
+  return date >= start && date <= end;
+}
+function isChristmasWindow(date = new Date()){ return date.getMonth() === 11; }
+function isNewYearWindow(date = new Date()){
+  const year = date.getFullYear();
+  const nyeYear = date.getMonth() === 0 ? year - 1 : year;
+  const nye = new Date(nyeYear, 11, 31);
+  const end = new Date(nye); end.setDate(end.getDate() + 14);
+  return date >= nye && date <= end;
+}
+function getActiveSeasonTheme(date = new Date()){
+  if(isNewYearWindow(date)) return 'new-year';
+  if(isChristmasWindow(date)) return 'christmas';
+  return 'default';
+}
+
+// Called from startWave() every 25 waves, only while isPortalWindow() is true.
+function maybeSpawnPortal(w){
+  if(w<=0 || w%25!==0 || !isPortalWindow()) return;
+  const options = DIMENSIONS.filter(d => d!==dimensionState.current);
+  const destination = options[Math.floor(Math.random()*options.length)];
+  portals.push({ x: rand(60, W-60), y:-40, vy:1.1, destination, phase: Math.random()*Math.PI*2 });
+}
+
+function updatePortals(){
+  portals = portals.filter(p=>{
+    p.y += p.vy;
+    if(p.y > H+40) return false;
+    if(circleHit(p, player, 22, 15)){
+      dimensionState.current = p.destination;
+      const style = DIMENSION_STYLE[p.destination];
+      spawnParticles(player.x, player.y, style ? style.glow : '#0ff', 26, 5, 4);
+      SFX.uiClick();
+      return false;
+    }
+    return true;
+  });
+}
+
+function drawPortals(){
+  for(const p of portals){
+    const style = DIMENSION_STYLE[p.destination] || { glow:'#0ff' };
+    const bob = Math.sin(p.phase + frame*0.05)*3;
+    ctx.save();
+    ctx.translate(p.x, p.y+bob);
+    ctx.shadowColor = style.glow; ctx.shadowBlur = 18;
+    ctx.strokeStyle = style.glow; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.ellipse(0,0,16,22, frame*0.03, 0, Math.PI*2); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+}
+
+// Subtle full-screen tint so the current dimension reads clearly without
+// hiding gameplay — same layering idea as drawPlanetOverlay() above.
+function drawDimensionOverlay(){
+  const style = DIMENSION_STYLE[dimensionState.current];
+  if(!style) return; // 'normal' — no tint
+  ctx.save();
+  ctx.fillStyle = style.tint;
+  ctx.fillRect(0,0,W,H);
+  ctx.restore();
+}
+
+// ---- Seasonal theme (menu colors + in-game fireworks) ----
+const SEASON_COLORS = {
+  'christmas': { accent1:'#ff3d47', accent2:'#1fae55' },
+  'new-year':  { accent1:'#ffd23d', accent2:'#00ffcc' },
+};
+function applySeasonalTheme(){
+  const theme = getActiveSeasonTheme();
+  const colors = SEASON_COLORS[theme];
+  const root = document.documentElement.style;
+  if(colors){
+    root.setProperty('--accent1', colors.accent1);
+    root.setProperty('--accent2', colors.accent2);
+  } else {
+    root.removeProperty('--accent1');
+    root.removeProperty('--accent2');
+  }
+}
+
+// In-game firework bursts — reuses the existing particle system so it
+// matches the game's own visual style instead of a separate effect.
+let fireworkTimer = 0;
+function updateFireworks(){
+  if(getActiveSeasonTheme() !== 'new-year') return;
+  fireworkTimer--;
+  if(fireworkTimer<=0){
+    fireworkTimer = 70 + Math.floor(Math.random()*60);
+    const hue = ['#ff3d47','#ffd23d','#5ecbff','#5cff8a','#b388ff'][Math.floor(Math.random()*5)];
+    spawnParticles(rand(60,W-60), rand(60,H*0.5), hue, 34, 4.5, 4);
+  }
+}
+
+// Menu fireworks — the menu (#center) is plain DOM, not canvas, so this
+// drops small emoji bursts behind the menu text using absolute-positioned
+// divs + a CSS fade-out, instead of reusing the canvas particle system.
+let menuFireworkInterval = null;
+function startMenuFireworks(){
+  if(menuFireworkInterval || getActiveSeasonTheme() !== 'new-year') return;
+  menuFireworkInterval = setInterval(()=>{
+    const center = document.getElementById('center');
+    if(!center || center.classList.contains('hidden')) return;
+    const el = document.createElement('div');
+    el.textContent = '🎆';
+    el.style.cssText = `position:absolute; left:${rand(10,90)}%; top:${rand(10,60)}%;
+      font-size:${rand(20,34)}px; pointer-events:none; opacity:1;
+      transition:opacity 1.1s ease-out, transform 1.1s ease-out; z-index:5;`;
+    center.appendChild(el);
+    requestAnimationFrame(()=>{ el.style.opacity='0'; el.style.transform='translateY(-20px)'; });
+    setTimeout(()=> el.remove(), 1300);
+  }, 900);
+}
+
+// Pre-seeded once with real randomness (not a linear formula), so stars
+// don't line up into a visible grid/diagonal pattern. Each star keeps its
+// own x and scroll speed (a simple depth-parallax cue), and only falls
+// straight down — the old version also drifted sideways in lockstep with
+// every other star, which was part of what made the pattern so visible.
+const STARS = Array.from({length:80}, () => ({
+  x: Math.random()*W,
+  y0: Math.random()*H,
+  speed: 0.3 + Math.random()*1.6,
+  size: 1 + Math.random()*1.4,
+}));
 function drawStars(){
   ctx.fillStyle=starColor;
-  for(let i=0;i<60;i++){
-    const sx = (i*97 + frame*0.6) % W;
-    const sy = (i*53 + frame*1.4) % H;
-    ctx.fillRect(sx,sy,1.5,1.5);
+  for(const s of STARS){
+    const sy = (s.y0 + frame*s.speed) % H;
+    ctx.fillRect(s.x, sy, s.size, s.size);
   }
 }
  
@@ -6222,6 +6413,7 @@ function render(){
   }
   ctx.clearRect(-10,-10,W+20,H+20);
   if(earthTheme && gameMode !== 'solar') drawEarthBackground(); else drawStars();
+  drawDimensionOverlay();
   if(gameMode === 'solar'){
     drawSolarExtras();
     drawBullets();
@@ -6234,6 +6426,7 @@ function render(){
   drawBombs();
   drawGasClouds();
   drawPowerups();
+  drawPortals();
   drawLockLine();
   for(const e of enemies) drawEnemy(e);
   drawAllies();
@@ -6440,6 +6633,8 @@ function tick(){
   applyGravityWell();
   updateCollisions();
   updatePowerups();
+  updatePortals();
+  updateFireworks();
   if(godMode) player.hp = player.maxHp;
   updateParticles();
   updateHud();
@@ -6583,6 +6778,8 @@ function openPause(){
   setMobileControlsVisible(false);
   MUSIC.setDuck(0.35);
   SFX.uiClick();
+  navFocusIndex = 0;
+  applyNavFocusStyle();
 }
 function closePause(){
   if(!paused) return;
@@ -7097,14 +7294,21 @@ let navFocusIndex = 0;
 function getNavTargets(){
   // Any of these modal overlays sit in #wrap, outside #center, so they need
   // their own check here — otherwise gamepad nav goes dead the moment one
-  // opens (mode select, settings, account, donate), same as it already did
-  // for the skins overlay below.
-  for(const id of ['modeSelectOverlay','settingsOverlay','accountOverlay','donateOverlay']){
+  // opens (mode select, settings, account, donate, key bindings), same as
+  // it already did for the skins overlay below.
+  for(const id of ['modeSelectOverlay','settingsOverlay','keybindOverlay','accountOverlay','donateOverlay']){
     const overlay = document.getElementById(id);
     if(overlay){
       const all = Array.from(overlay.querySelectorAll('button'));
       return all.filter(el => window.getComputedStyle(el).display !== 'none' && !el.disabled);
     }
+  }
+  // pauseOverlay is a static element toggled via the 'hidden' class rather
+  // than appended/removed like the overlays above, so it needs its own check.
+  const pauseOverlay = document.getElementById('pauseOverlay');
+  if(pauseOverlay && !pauseOverlay.classList.contains('hidden')){
+    const all = Array.from(pauseOverlay.querySelectorAll('button'));
+    return all.filter(el => window.getComputedStyle(el).display !== 'none' && !el.disabled);
   }
   // if the skins overlay is open, navigate within it instead (it sits on top)
   const skinsOverlay = document.getElementById('skinsOverlay');
@@ -7144,9 +7348,11 @@ function navGamepadTick(){
  
   const center = document.getElementById('center');
   const skinsOverlay = document.getElementById('skinsOverlay');
+  const pauseOverlay = document.getElementById('pauseOverlay');
+  const pauseOpen = pauseOverlay && !pauseOverlay.classList.contains('hidden');
   const anyModalOverlay = document.getElementById('modeSelectOverlay') || document.getElementById('settingsOverlay')
-    || document.getElementById('accountOverlay') || document.getElementById('donateOverlay');
-  const uiOpen = anyModalOverlay || skinsOverlay || (center && !center.classList.contains('hidden'));
+    || document.getElementById('keybindOverlay') || document.getElementById('accountOverlay') || document.getElementById('donateOverlay');
+  const uiOpen = anyModalOverlay || skinsOverlay || pauseOpen || (center && !center.classList.contains('hidden'));
   if(!uiOpen) return;
  
   const targets = getNavTargets();
@@ -8833,6 +9039,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const center = document.getElementById('center');
   if(center) centerObserver.observe(center, { childList:true, subtree:true });
   applyDisplaySettings();
+  applySeasonalTheme();
+  startMenuFireworks();
   // Check the server-side (IP-hash) ban before trusting localStorage alone —
   // otherwise clearing site data would be enough to dodge a real ban.
   if(window.__checkIpBanned){
