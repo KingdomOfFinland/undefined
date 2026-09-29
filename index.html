@@ -1434,7 +1434,8 @@ const ACTIONS = [
   { id:'cloak_ability',         label:'Cloak',                default:'5' },
   { id:'gravitywell_ability',   label:'Gravity Well',         default:'6' },
   { id:'corruptionpurge_ability', label:'Corruption Purge',   default:'7' },
-  { id:'immunity_ability',      label:'Immunity (Kamikaze)',  default:'8' }
+  { id:'immunity_ability',      label:'Immunity (Kamikaze)',  default:'8' },
+  { id:'shapeshift_ability',    label:'Shapeshift',           default:'9' }
 ];
 function getKeybindsRaw(){
   try { return JSON.parse(localStorage.getItem('uf_keybinds')) || {}; }
@@ -3795,6 +3796,14 @@ const player = {
   gravityWellT:0, gravityWellAbilityCd:0, gravityWellX:0, gravityWellY:0,
   corruptionPurgeT:0, corruptionPurgeAbilityCd:0,
   immuneT:0, immuneAbilityCd:0,
+  // ---- Shapeshift (key 9): lock+release like the main missile, but its
+  // own separate lock so it doesn't fight over player.lockTarget. Killing
+  // the locked enemy with this missile turns the player into that enemy
+  // type for shapeshiftT frames, and — reusing the same aim-jitter/lock-loss
+  // hook as Cloak (see isPlayerHidden()) — makes them go unnoticed by every
+  // enemy for that whole duration.
+  shapeshiftLockTarget:null, shapeshiftLockProgress:0, shapeshiftAbilityCd:0,
+  shapeshiftT:0, shapeshiftType:null,
   nukeCharges:0, nukeCd:0, nukeAwardedAt:0, empT:0, onFireT:0, onFireDmgTick:0,
   // ---- Distance-traveled + Afterburner ability (key 0) ----
   distance:0, afterburnerActive:false,
@@ -4439,6 +4448,11 @@ function updatePowerupTimers(){
   if(player.corruptionPurgeAbilityCd>0) player.corruptionPurgeAbilityCd--;
   if(player.immuneT>0) player.immuneT--;
   if(player.immuneAbilityCd>0) player.immuneAbilityCd--;
+  if(player.shapeshiftT>0){
+    player.shapeshiftT--;
+    if(player.shapeshiftT<=0) player.shapeshiftType = null;
+  }
+  if(player.shapeshiftAbilityCd>0) player.shapeshiftAbilityCd--;
   if(player.commsJamT>0) player.commsJamT--;
   if(player.missilePanicT>0){
     player.missilePanicT--;
@@ -4477,7 +4491,8 @@ const BUFF_LABELS = {
   cloak:        ['CLOAKED', '#8888ff'],
   gravitywell:  ['GRAVITY WELL', '#b388ff'],
   corruptpurge: ['CORRUPTION PURGED', '#5cff8a'],
-  immune:       ['IMMUNE — KAMIKAZE x4', '#fffb5c']
+  immune:       ['IMMUNE — KAMIKAZE x4', '#fffb5c'],
+  shapeshift:   ['SHAPESHIFT', '#ff8ad8']
 };
 function drawBuffHud(){
   const active = [];
@@ -4495,13 +4510,19 @@ function drawBuffHud(){
   if(player.gravityWellT>0) active.push(['gravitywell', player.gravityWellT]);
   if(player.corruptionPurgeT>0) active.push(['corruptpurge', player.corruptionPurgeT]);
   if(player.immuneT>0) active.push(['immune', player.immuneT]);
+  if(player.shapeshiftT>0) active.push(['shapeshift', player.shapeshiftT]);
   if(!active.length) return;
   ctx.save();
   ctx.font = '11px "Courier New", monospace';
   ctx.textAlign = 'center';
   let y = 48;
   for(const [id,t] of active){
-    const [label,color] = BUFF_LABELS[id];
+    const [baseLabel,color] = BUFF_LABELS[id];
+    // Shapeshift shows which enemy type the player currently is, e.g.
+    // "SHAPESHIFT: DRONE" instead of the generic label.
+    const label = (id==='shapeshift' && player.shapeshiftType)
+      ? `${baseLabel}: ${player.shapeshiftType.toUpperCase()}`
+      : baseLabel;
     ctx.fillStyle = color;
     ctx.shadowColor = color; ctx.shadowBlur = 6;
     ctx.fillText(`${label} ${(t/60).toFixed(1)}s`, W/2, y);
@@ -4730,6 +4751,25 @@ function fireMissile(){
   player.lockTarget = null;
   player.lockProgress = 0;
 }
+
+// Called on a confirmed kill from a Shapeshift-flagged missile. Turns the
+// player into that enemy type for 75s (visual swap in drawPlayer) and, via
+// isPlayerHidden(), makes them unnoticed by every enemy for the same span —
+// reuses the exact aim-jitter/lock-loss check Cloak already threads through
+// every enemy's targeting code, just extended to a much longer duration.
+function startShapeshift(enemyType){
+  player.shapeshiftT = 4500; // 75s
+  player.shapeshiftType = enemyType;
+  spawnParticles(player.x, player.y, '#ff8ad8', 26, 5, 4);
+  SFX.lockReady();
+}
+
+// Single source of truth for "is the player currently invisible to enemy
+// targeting" — true during Cloak OR Shapeshift. Every enemy aim/lock check
+// that used to read player.cloakT>0 directly now goes through this instead.
+function isPlayerHidden(){
+  return player.cloakT>0 || player.shapeshiftT>0;
+}
  
 function popFlare(){
   if(player.flares<=0 || player.flareCd>0) return;
@@ -4952,6 +4992,39 @@ function updatePlayer(){
       player.lockProgress = 0;
     }
   }
+
+  // ---- Shapeshift [key 9] — hold to lock, release to fire. Killing the
+  // locked enemy with this missile turns the player into that enemy type
+  // for 75s, unnoticed by every enemy. Cooldown 3 min. ----
+  const shapeshiftHeld = keys[getKeybind('shapeshift_ability')];
+  if(hasAbility('shapeshift_ability') && gameMode !== 'solar'){
+    if(shapeshiftHeld && player.shapeshiftAbilityCd<=0){
+      if(!player.shapeshiftLockTarget || !player.shapeshiftLockTarget.alive){
+        const prevTarget = player.shapeshiftLockTarget;
+        player.shapeshiftLockTarget = findLockTarget();
+        player.shapeshiftLockProgress = 0;
+        if(player.shapeshiftLockTarget && player.shapeshiftLockTarget!==prevTarget) SFX.lockBeep();
+      }
+      if(player.shapeshiftLockTarget){
+        const wasReady = player.shapeshiftLockProgress>=40;
+        player.shapeshiftLockProgress = Math.min(player.shapeshiftLockProgress+1, 40);
+        if(!wasReady && player.shapeshiftLockProgress%8===0) SFX.lockBeep();
+        if(!wasReady && player.shapeshiftLockProgress>=40) SFX.lockReady();
+      }
+    } else if(player.shapeshiftLockTarget && player.shapeshiftLockProgress>=40){
+      SFX.missileLaunch();
+      missiles.push(makeMissile({
+        x:player.x, y:player.y-10, vx:0, vy:-4, side:'player', shapeshift:true,
+        target: player.shapeshiftLockTarget, speed:6.5, turn:0.09, life:240, w:6,h:12
+      }, true));
+      player.shapeshiftLockTarget = null;
+      player.shapeshiftLockProgress = 0;
+      player.shapeshiftAbilityCd = 10800; // 3 min cooldown
+    } else {
+      player.shapeshiftLockTarget = null;
+      player.shapeshiftLockProgress = 0;
+    }
+  }
  
   if(gp) gamepadPrev.tri = gp.triBtn;
   if(gp) gamepadPrev.sq = gp.sqBtn;
@@ -4990,7 +5063,7 @@ function updateMissiles(){
           m.x+=m.vx; m.y+=m.vy;
           return m.x>-40 && m.x<W+40 && m.y>-40 && m.y<H+40;
         }
-      } else if((player.commsJamT>0 || player.cloakT>0) && !m.heatseeking){
+      } else if((player.commsJamT>0 || isPlayerHidden()) && !m.heatseeking){
         // comms jammed / player cloaked — lost lock on the player, mistakes another enemy as its target
         if(!m.jamTarget || !m.jamTarget.alive || frame % 45 === 0){
           const candidates = enemies.filter(en=>en.alive);
@@ -5128,7 +5201,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = rand(40,70);
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
       }
       if(empPulseT<=0) e.missileCd--;
@@ -5193,7 +5266,7 @@ function updateEnemies(){
       if(!e.diving && e.y>120) e.diving = Math.random()<0.02;
       if(e.diving){
         let tgt = player;
-        if(player.commsJamT>0 || player.cloakT>0){
+        if(player.commsJamT>0 || isPlayerHidden()){
           if(!e.confusedTarget || !e.confusedTarget.alive || frame % 50 === 0){
             const candidates = enemies.filter(en=>en.alive && en!==e);
             e.confusedTarget = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : null;
@@ -5219,7 +5292,7 @@ function updateEnemies(){
           awardKillCoins(e);
           SFX.explosionSmall();
         } else if(damagePlayer(20)){ SFX.playerHit(); } else { SFX.shieldBlock(); }
-      } else if((player.commsJamT>0 || player.cloakT>0) && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
+      } else if((player.commsJamT>0 || isPlayerHidden()) && e.confusedTarget && e.confusedTarget.alive && dist(e,e.confusedTarget) < 26){
         // confused kamikaze into another enemy — friendly fire, no score
         const targetDead = damageEnemy(e.confusedTarget, 20);
         e.alive=false; e.hp=0;
@@ -5237,7 +5310,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = rand(70,110);
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*3.2,vy:Math.sin(ang)*3.2,w:5,h:5,side:'enemy'});
       }
     }
@@ -5249,7 +5322,7 @@ function updateEnemies(){
       if(e.gunCd<=0){
         e.gunCd = 150; // fires every 2.5s @ 60fps
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:4,h:4,side:'enemy',dmg:4});
       }
     }
@@ -5313,7 +5386,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = rand(90,130);
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         // precise sniper burst — 2 bullets, tight spread, fast
         for(let i=-1;i<=1;i+=2){
           const spread = i*0.05;
@@ -5338,7 +5411,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = 8;  // Bandkanon 1 fire rate
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0)) + rand(-0.15,0.15);
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0)) + rand(-0.15,0.15);
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*5,vy:Math.sin(ang)*5,w:4,h:4,side:'enemy'});
       }
     }
@@ -5388,7 +5461,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = rand(45,80);
         SFX.enemyShoot();
-        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const ang = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(ang)*4,vy:Math.sin(ang)*4,w:6,h:6,side:'enemy'});
       }
     }
@@ -5402,7 +5475,7 @@ function updateEnemies(){
       if(e.fireCd<=0){
         e.fireCd = 15;
         SFX.enemyShoot();
-        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         for(let i=0;i<8;i++){
           const spread = (i-3.5) * 0.09;
           enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*4.5,vy:Math.sin(baseAng+spread)*4.5,w:5,h:5,side:'enemy'});
@@ -5449,7 +5522,7 @@ function updateEnemies(){
       if(e.pinCd<=0){
         e.pinCd = rand(60,100);
         SFX.enemyShoot();
-        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (player.cloakT>0 ? rand(-0.6,0.6) : 0));
+        const baseAng = (Math.atan2(player.y-e.y, player.x-e.x) + (isPlayerHidden() ? rand(-0.6,0.6) : 0));
         for(let i=-1;i<=1;i++){
           const spread = i*0.12;
           enemyBullets.push({x:e.x,y:e.y,vx:Math.cos(baseAng+spread)*5.5,vy:Math.sin(baseAng+spread)*5.5,w:4,h:4,side:'enemy',golden:true});
@@ -5600,6 +5673,7 @@ function updateCollisions(){
           maybeDropPowerup(e);
           awardKillCoins(e);
           if(e.type==='blimp') spawnBlimpGas(e);
+          if(m.shapeshift) startShapeshift(e.type);
         }
         break;
       }
@@ -5811,7 +5885,30 @@ function drawPlayer(){
   }
   
   const thrusting = keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']||(Math.abs(touchMove.x)>0.05||Math.abs(touchMove.y)>0.05);
-  if(customShipImgEl){
+  if(player.shapeshiftT>0){
+    // Render as the killed enemy's own skin rather than the ship. Enemy
+    // skin draw(ctx,e) functions are written for a real enemy object, so
+    // this is wrapped in try/catch — anything that needs a field this
+    // stand-in doesn't have just falls back to a simple glowing silhouette
+    // instead of breaking the render.
+    const skinList = ENEMY_SKINS[player.shapeshiftType];
+    const skin = skinList && (skinList.find(s => s.id === getEquippedEnemySkin(player.shapeshiftType)) || skinList[0]);
+    let drew = false;
+    if(skin){
+      try {
+        skin.draw(ctx, { x:0, y:0, w:28, h:28, hp:1, maxHp:1, phase:frame*0.02, type:player.shapeshiftType });
+        drew = true;
+      } catch(err){
+        console.warn('[UF] Shapeshift skin draw failed, using fallback silhouette:', err);
+      }
+    }
+    if(!drew){
+      const pulse = 1 + Math.sin(frame*0.15)*0.08;
+      ctx.fillStyle = 'rgba(255,138,216,0.85)';
+      ctx.shadowColor = '#ff8ad8'; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(0,0,16*pulse,0,Math.PI*2); ctx.fill();
+    }
+  } else if(customShipImgEl){
     const scale = Math.min(CUSTOM_SHIP_BOX/customShipImgEl.naturalWidth, CUSTOM_SHIP_BOX/customShipImgEl.naturalHeight);
     const dw = customShipImgEl.naturalWidth*scale, dh = customShipImgEl.naturalHeight*scale;
     ctx.drawImage(customShipImgEl, -dw/2, -dh/2, dw, dh);
@@ -5991,6 +6088,18 @@ function drawLockLine(){
     ctx.setLineDash([]);
     ctx.strokeStyle = p>=1 ? '#f33':'#fc3';
     ctx.beginPath(); ctx.arc(t.x,t.y, 22 - p*6, 0, Math.PI*2*p);
+    ctx.stroke();
+  }
+  if(player.shapeshiftLockTarget && player.shapeshiftLockTarget.alive){
+    const t = player.shapeshiftLockTarget;
+    const p = player.shapeshiftLockProgress/40;
+    ctx.strokeStyle = p>=1 ? 'rgba(255,138,216,0.9)' : 'rgba(255,138,216,0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2,3]);
+    ctx.beginPath(); ctx.moveTo(player.x,player.y); ctx.lineTo(t.x,t.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#ff8ad8';
+    ctx.beginPath(); ctx.arc(t.x,t.y, 30 - p*6, 0, Math.PI*2*p);
     ctx.stroke();
   }
 }
@@ -6712,6 +6821,8 @@ async function resetGame(theme){
   player.gravityWellT=0; player.gravityWellAbilityCd=0;
   player.corruptionPurgeT=0; player.corruptionPurgeAbilityCd=0;
   player.immuneT=0; player.immuneAbilityCd=0;
+  player.shapeshiftLockTarget=null; player.shapeshiftLockProgress=0;
+  player.shapeshiftAbilityCd=0; player.shapeshiftT=0; player.shapeshiftType=null;
   empPulseT=0;
   player.nukeCharges=0; player.nukeCd=0; player.nukeAwardedAt=0; player.empT=0;
   player.onFireT=0; player.onFireDmgTick=0;
@@ -7414,7 +7525,8 @@ const ABILITY_DEFS = [
   { id:'cloak_ability', name:'Cloak', desc:'4s of going dark — missiles and drones lose lock, gunners fire wild. Cooldown 45s.', costType:'coins', cost:420, keyLabel:'5', gpLabel:'—', color:'#8888ff' },
   { id:'gravitywell_ability', name:'Gravity Well', desc:'Drags nearby enemies, bullets and missiles toward one point for 3s — great before a nuke or missile cult. Cooldown 50s.', costType:'cash', cost:16, keyLabel:'6', gpLabel:'—', color:'#b388ff' },
   { id:'corruptionpurge_ability', name:'Corruption Purge', desc:'Zeroes out the high-wave glitch corruption (visuals + enemy camouflage) for 10s. Only does anything on corrupted waves. Cooldown 30s.', costType:'coins', cost:350, keyLabel:'7', gpLabel:'—', color:'#5cff8a' },
-  { id:'immunity_ability', name:'Immunity', desc:'30s of total invulnerability — ram straight through every enemy for an instant kill, and every kill (however you get it) pays out 4x score and coins. Cooldown 5 min.', costType:'cash', cost:35, keyLabel:'8', gpLabel:'—', color:'#fffb5c' }
+  { id:'immunity_ability', name:'Immunity', desc:'30s of total invulnerability — ram straight through every enemy for an instant kill, and every kill (however you get it) pays out 4x score and coins. Cooldown 5 min.', costType:'cash', cost:35, keyLabel:'8', gpLabel:'—', color:'#fffb5c' },
+  { id:'shapeshift_ability', name:'Shapeshift', desc:'Hold to lock, release to fire a missile — kill the locked enemy with it and you become that enemy type for 75s, unnoticed by every enemy the whole time. Cooldown 3 min.', costType:'cash', cost:32, keyLabel:'9', gpLabel:'—', color:'#ff8ad8' }
 ];
  
 // ---------- Black Market ----------
